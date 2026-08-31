@@ -2391,6 +2391,21 @@ impl TermWindow {
             Some(tab) => tab,
             None => return,
         };
+        // Acts as a toggle: if this tab already has a file manager
+        // sidebar, close it instead of opening another one.
+        if let Some(fm_pane_id) = crate::overlay::file_manager::take_sidebar(tab.tab_id()) {
+            if let Some(pos) = tab
+                .iter_panes_ignoring_zoom()
+                .iter()
+                .find(|p| p.pane.pane_id() == fm_pane_id)
+            {
+                pos.pane.kill();
+                mux.prune_dead_windows();
+                return;
+            }
+            // stale registration (pane already gone); fall through and open
+        }
+
         let pane = match self.get_active_pane_or_overlay() {
             Some(pane) => pane,
             None => return,
@@ -2456,10 +2471,13 @@ impl TermWindow {
                 }
             };
         tab.set_active_idx(sidebar_index);
+        let tab_id = tab.tab_id();
+        crate::overlay::file_manager::register_sidebar(tab_id, tw_pane.pane_id());
 
         let future = promise::spawn::spawn_into_new_thread(move || {
             let res = file_manager(tw_term, backend, start_dir);
             promise::spawn::spawn_into_main_thread(async move {
+                crate::overlay::file_manager::unregister_sidebar(tab_id, tw_pane.pane_id());
                 tw_pane.kill();
                 Mux::get().prune_dead_windows();
             })

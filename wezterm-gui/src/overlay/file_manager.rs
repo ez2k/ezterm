@@ -3,9 +3,13 @@
 //! For panes attached to an ssh domain it browses the remote filesystem
 //! over the existing ssh session using SFTP, and supports downloading
 //! files to the local machine and uploading local files to the remote.
+use mux::pane::PaneId;
+use mux::tab::TabId;
 use smol::io::{AsyncReadExt, AsyncWriteExt};
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 use termwiz::cell::{AttributeChange, CellAttributes};
 use termwiz::color::ColorAttribute;
 use termwiz::input::{InputEvent, KeyCode, KeyEvent, Modifiers};
@@ -22,6 +26,28 @@ const ROW_OVERHEAD: usize = 3;
 pub enum FileManagerBackend {
     Local,
     Remote { sftp: Sftp, label: String },
+}
+
+/// Tracks the file manager sidebar pane that is open in each tab,
+/// so that ShowFileManager can act as a toggle.
+static OPEN_SIDEBARS: LazyLock<Mutex<HashMap<TabId, PaneId>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub fn register_sidebar(tab_id: TabId, pane_id: PaneId) {
+    OPEN_SIDEBARS.lock().unwrap().insert(tab_id, pane_id);
+}
+
+/// Removes and returns the sidebar pane registered for the tab, if any
+pub fn take_sidebar(tab_id: TabId) -> Option<PaneId> {
+    OPEN_SIDEBARS.lock().unwrap().remove(&tab_id)
+}
+
+/// Removes the registration only if it still refers to the given pane
+pub fn unregister_sidebar(tab_id: TabId, pane_id: PaneId) {
+    let mut open = OPEN_SIDEBARS.lock().unwrap();
+    if open.get(&tab_id) == Some(&pane_id) {
+        open.remove(&tab_id);
+    }
 }
 
 #[derive(Clone)]
