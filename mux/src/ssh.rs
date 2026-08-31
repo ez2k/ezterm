@@ -244,6 +244,13 @@ impl RemoteSshDomain {
         ssh_domain_to_ssh_config(&self.dom)
     }
 
+    /// Returns the established ssh session, if we have one.
+    /// The session is only available once a pane has successfully
+    /// connected to the remote host.
+    pub fn connected_session(&self) -> Option<Session> {
+        self.session.lock().unwrap().as_ref().cloned()
+    }
+
     fn build_command(
         &self,
         pane_id: PaneId,

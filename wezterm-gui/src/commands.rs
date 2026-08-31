@@ -2011,6 +2011,17 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Edit"],
             icon: None,
         },
+        ShowFileManager => CommandDef {
+            brief: "Show file manager".into(),
+            doc: "Activates the file manager overlay; browses the local \
+                filesystem, or the remote filesystem via SFTP for ssh domain \
+                panes, with download/upload support"
+                .into(),
+            keys: vec![],
+            args: &[ArgType::ActivePane],
+            menubar: &["Shell"],
+            icon: Some("md_folder"),
+        },
     })
 }
 
@@ -2136,6 +2147,7 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         ActivateLastTab,
         ShowLauncher,
         ShowTabNavigator,
+        ShowFileManager,
         // ----------------- Help
         OpenUri("https://wezterm.org/".to_string()),
         OpenUri("https://github.com/wezterm/wezterm/discussions/".to_string()),
