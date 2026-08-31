@@ -2420,11 +2420,58 @@ impl TermWindow {
                     .to_string()
             });
 
-        let (overlay, future) = start_overlay(self, &tab, move |_tab_id, term| {
-            file_manager(term, backend, start_dir)
+        // Open the file manager as a right-hand sidebar: a real split pane
+        // spanning the full height of the tab, rather than a whole-tab overlay.
+        if tab.get_zoomed_pane().is_some() {
+            tab.set_zoomed(false);
+        }
+        let pane_index = match tab
+            .iter_panes_ignoring_zoom()
+            .iter()
+            .find(|p| p.pane.pane_id() == pane.pane_id())
+        {
+            Some(p) => p.index,
+            None => return,
+        };
+        let split_request = SplitRequest {
+            direction: SplitDirection::Horizontal,
+            target_is_second: true,
+            top_level: true,
+            size: MuxSplitSize::Percent(30),
+        };
+        let split_size = match tab.compute_split_size(pane_index, split_request) {
+            Some(s) => s,
+            None => return,
+        };
+        let term_config: Arc<dyn wezterm_term::TerminalConfiguration + Send + Sync> =
+            Arc::new(config::TermConfig::with_config(self.config.clone()));
+        let (tw_term, tw_pane) = mux::termwiztermtab::allocate(split_size.second, term_config);
+        let sidebar_index =
+            match tab.split_and_insert(pane_index, split_request, Arc::clone(&tw_pane)) {
+                Ok(idx) => idx,
+                Err(err) => {
+                    log::error!("unable to split tab for file manager: {err:#}");
+                    tw_pane.kill();
+                    return;
+                }
+            };
+        tab.set_active_idx(sidebar_index);
+
+        let future = promise::spawn::spawn_into_new_thread(move || {
+            let res = file_manager(tw_term, backend, start_dir);
+            promise::spawn::spawn_into_main_thread(async move {
+                tw_pane.kill();
+                Mux::get().prune_dead_windows();
+            })
+            .detach();
+            res
         });
-        self.assign_overlay(tab.tab_id(), overlay);
-        promise::spawn::spawn(future).detach();
+        promise::spawn::spawn(async move {
+            if let Err(err) = future.await {
+                log::error!("file manager: {err:#}");
+            }
+        })
+        .detach();
     }
 
     fn show_launcher(&mut self) {
