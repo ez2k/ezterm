@@ -2384,6 +2384,49 @@ impl TermWindow {
         self.show_launcher_impl(args, active_tab_idx);
     }
 
+    fn show_file_manager(&mut self) {
+        use crate::overlay::{file_manager, FileManagerBackend};
+        let mux = Mux::get();
+        let tab = match mux.get_active_tab_for_window(self.mux_window_id) {
+            Some(tab) => tab,
+            None => return,
+        };
+        let pane = match self.get_active_pane_or_overlay() {
+            Some(pane) => pane,
+            None => return,
+        };
+
+        // If the pane belongs to an ssh domain with an established session,
+        // browse the remote filesystem via SFTP; otherwise browse locally.
+        let mut backend = FileManagerBackend::Local;
+        if let Some(domain) = mux.get_domain(pane.domain_id()) {
+            if let Some(ssh) = domain.downcast_ref::<mux::ssh::RemoteSshDomain>() {
+                if let Some(session) = ssh.connected_session() {
+                    backend = FileManagerBackend::Remote {
+                        sftp: session.sftp(),
+                        label: domain.domain_name().to_string(),
+                    };
+                }
+            }
+        }
+
+        // The pane's OSC 7 cwd (if any) refers to the filesystem the pane's
+        // shell runs on, which matches the backend chosen above.
+        let start_dir = pane
+            .get_current_working_dir(CachePolicy::AllowStale)
+            .map(|url| {
+                percent_encoding::percent_decode_str(url.path())
+                    .decode_utf8_lossy()
+                    .to_string()
+            });
+
+        let (overlay, future) = start_overlay(self, &tab, move |_tab_id, term| {
+            file_manager(term, backend, start_dir)
+        });
+        self.assign_overlay(tab.tab_id(), overlay);
+        promise::spawn::spawn(future).detach();
+    }
+
     fn show_launcher(&mut self) {
         let title = "Launcher".to_string();
         let args = LauncherActionArgs {
@@ -2777,6 +2820,7 @@ impl TermWindow {
             ScrollToBottom => self.scroll_to_bottom(pane),
             ShowTabNavigator => self.show_tab_navigator(),
             ShowDebugOverlay => self.show_debug_overlay(),
+            ShowFileManager => self.show_file_manager(),
             ShowLauncher => self.show_launcher(),
             ShowLauncherArgs(args) => {
                 let title = args.title.clone().unwrap_or("Launcher".to_string());
