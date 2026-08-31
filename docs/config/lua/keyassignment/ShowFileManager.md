@@ -2,9 +2,10 @@
 
 {{since('nightly')}}
 
-Opens a simple file manager in a sidebar pane on the right side of the
-current tab (a full-height split taking 30% of the width). Closing the
-file manager (`q`/`Escape`) closes the sidebar pane.
+Toggles a simple file manager in a sidebar pane on the right side of the
+current tab (a full-height split taking 30% of the width). Invoking it
+again while the sidebar is open closes it; `q`/`Escape` inside the file
+manager also closes the sidebar pane.
 
 For local panes it browses the local filesystem starting from the pane's
 current working directory.
