@@ -1,0 +1,242 @@
+name: release
+
+# Fork-friendly automated build + release workflow for ez2k/ezterm.
+#
+# - Push to `main` (or manual dispatch): builds all platforms and updates
+#   the rolling `nightly` pre-release with fresh assets.
+# - Push a tag matching `v*` or `20*`: builds all platforms and creates a
+#   release for that tag with the packaged assets attached.
+#
+# The upstream wezterm gen_* workflows gate their upload jobs on
+# `github.repository == 'wezterm/wezterm'` and depend on secrets
+# (gemfury, homebrew tap, winget, macOS signing) that do not exist in
+# this fork, so this standalone workflow handles releases instead.
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+      - "20*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # deploy.sh names assets "*-nightly*" when BUILD_REASON=Schedule,
+  # giving stable filenames that `gh release upload --clobber` replaces.
+  BUILD_REASON: ${{ startsWith(github.ref, 'refs/tags/') && '' || 'Schedule' }}
+  TAG_NAME: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+    steps:
+      - name: "set APT to non-interactive"
+        shell: bash
+        run: "echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections"
+      - name: "Install base deps"
+        shell: bash
+        run: "apt update && apt-get install -y git curl openssh-server"
+      - name: "Ensure /run/sshd exists"
+        shell: bash
+        run: "mkdir -p /run/sshd"
+      - name: "Workaround git permissions issue"
+        shell: bash
+        run: "git config --global --add safe.directory '*'"
+      - name: "checkout repo"
+        uses: actions/checkout@v5
+        with:
+          submodules: "recursive"
+      - name: "Install Rust"
+        uses: dtolnay/rust-toolchain@stable
+      - name: "Compile with sccache"
+        uses: mozilla-actions/sccache-action@v0.0.9
+      - name: "Cache Rust Dependencies"
+        uses: actions/cache@v4
+        id: cache-cargo-vendor
+        with:
+          path: |
+            vendor
+            .cargo/config
+          key: "cargo-deps-${{ hashFiles('**/Cargo.lock') }}"
+      - name: "Vendor dependencies"
+        if: steps.cache-cargo-vendor.outputs.cache-hit != 'true'
+        shell: bash
+        run: "cargo vendor --locked --versioned-dirs >> .cargo/config"
+      - name: "Install System Deps"
+        shell: bash
+        run: "env CI=yes PATH=$PATH ./get-deps"
+      - name: "Build (Release mode)"
+        shell: bash
+        run: |
+          cargo build -p wezterm --release
+          cargo build -p wezterm-gui --release
+          cargo build -p wezterm-mux-server --release
+          cargo build -p strip-ansi-escapes --release
+      - name: "Package"
+        shell: bash
+        run: "bash ci/deploy.sh"
+      - name: "Upload artifact"
+        uses: actions/upload-artifact@v7
+        with:
+          name: "linux"
+          path: |
+            wezterm-*.deb
+            wezterm-*.xz
+          retention-days: 5
+
+  build-macos:
+    runs-on: macos-latest
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+      MACOSX_DEPLOYMENT_TARGET: "10.12"
+    steps:
+      - name: "checkout repo"
+        uses: actions/checkout@v5
+        with:
+          submodules: "recursive"
+      - name: "Install Rust targets"
+        shell: bash
+        run: |
+          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-apple-darwin
+      - name: "Compile with sccache"
+        uses: mozilla-actions/sccache-action@v0.0.9
+      - name: "Cache Rust Dependencies"
+        uses: actions/cache@v4
+        id: cache-cargo-vendor
+        with:
+          path: |
+            vendor
+            .cargo/config
+          key: "cargo-deps-${{ hashFiles('**/Cargo.lock') }}"
+      - name: "Vendor dependencies"
+        if: steps.cache-cargo-vendor.outputs.cache-hit != 'true'
+        shell: bash
+        run: "cargo vendor --locked --versioned-dirs >> .cargo/config"
+      - name: "Install System Deps"
+        shell: bash
+        run: "env CI=yes PATH=$PATH ./get-deps"
+      - name: "Build (Release mode, universal)"
+        shell: bash
+        run: |
+          for pkg in wezterm wezterm-gui wezterm-mux-server strip-ansi-escapes ; do
+            cargo build --target x86_64-apple-darwin -p $pkg --release
+            cargo build --target aarch64-apple-darwin -p $pkg --release
+          done
+      - name: "Package (unsigned)"
+        shell: bash
+        run: "bash ci/deploy.sh"
+      - name: "Upload artifact"
+        uses: actions/upload-artifact@v7
+        with:
+          name: "macos"
+          path: "WezTerm-*.zip"
+          retention-days: 5
+
+  build-windows:
+    runs-on: windows-2025
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+      RUSTUP_WINDOWS_PATH_ADD_BIN: "1"
+    steps:
+      - name: "checkout repo"
+        uses: actions/checkout@v5
+        with:
+          submodules: "recursive"
+      - name: "Install Rust"
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          target: "x86_64-pc-windows-msvc"
+      - name: "Compile with sccache"
+        uses: mozilla-actions/sccache-action@v0.0.9
+      - name: "Cache Rust Dependencies"
+        uses: actions/cache@v4
+        id: cache-cargo-vendor
+        with:
+          path: |
+            vendor
+            .cargo/config
+          key: "cargo-deps-${{ hashFiles('**/Cargo.lock') }}"
+      - name: "Vendor dependencies"
+        if: steps.cache-cargo-vendor.outputs.cache-hit != 'true'
+        shell: bash
+        run: "cargo vendor --locked --versioned-dirs >> .cargo/config"
+      - name: "Build (Release mode)"
+        shell: cmd
+        run: |
+          PATH C:\Strawberry\perl\bin;%PATH%
+          cargo build -p wezterm --release && cargo build -p wezterm-gui --release && cargo build -p wezterm-mux-server --release && cargo build -p strip-ansi-escapes --release
+      - name: "Package"
+        shell: bash
+        run: "bash ci/deploy.sh"
+      - name: "Upload artifact"
+        uses: actions/upload-artifact@v7
+        with:
+          name: "windows"
+          path: |
+            WezTerm-*.zip
+            WezTerm-*.exe
+          retention-days: 5
+
+  publish:
+    runs-on: ubuntu-latest
+    needs:
+      - build-linux
+      - build-macos
+      - build-windows
+    permissions:
+      contents: write
+    steps:
+      - name: "checkout repo"
+        uses: actions/checkout@v5
+      - name: "Download artifacts"
+        uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+      - name: "Checksum"
+        shell: bash
+        run: |
+          shopt -s nullglob
+          for f in wezterm-*.deb wezterm-*.xz WezTerm-*.zip WezTerm-*.exe ; do
+            sha256sum "$f" > "$f.sha256"
+          done
+      - name: "Publish nightly release"
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          shopt -s nullglob
+          gh release view nightly || \
+            gh release create nightly --prerelease --title "Nightly" \
+              --notes "Rolling nightly build, automatically updated from the latest commit on main."
+          bash ci/retry.sh gh release upload --clobber nightly \
+            wezterm-*.deb wezterm-*.xz WezTerm-*.zip WezTerm-*.exe *.sha256
+      - name: "Publish tagged release"
+        if: "startsWith(github.ref, 'refs/tags/')"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          shopt -s nullglob
+          tag="${{ github.ref_name }}"
+          gh release view "$tag" || \
+            gh release create "$tag" --title "$tag" --generate-notes
+          bash ci/retry.sh gh release upload --clobber "$tag" \
+            wezterm-*.deb wezterm-*.xz WezTerm-*.zip WezTerm-*.exe *.sha256
