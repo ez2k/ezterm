@@ -67,6 +67,13 @@ struct FileManager {
     top_row: usize,
     max_items: usize,
     status: String,
+    /// browser-style navigation history: directories we can go back
+    /// and forward to
+    back_stack: Vec<String>,
+    fwd_stack: Vec<String>,
+    /// a single click delivers both a press and a release event with
+    /// the button set; this tracks the edge so we act only once per click
+    prev_mouse_buttons: MouseButtons,
 }
 
 struct PathPromptHost {
@@ -202,9 +209,65 @@ impl FileManager {
             top_row: 0,
             max_items: 0,
             status: String::new(),
+            back_stack: vec![],
+            fwd_stack: vec![],
+            prev_mouse_buttons: MouseButtons::NONE,
         };
         fm.reload()?;
         Ok(fm)
+    }
+
+    /// Change directory, recording history. Restores the prior cwd on error.
+    fn navigate_to(&mut self, new_cwd: String, record_history: bool) {
+        if new_cwd == self.cwd {
+            return;
+        }
+        let prior = std::mem::replace(&mut self.cwd, new_cwd);
+        match self.reload() {
+            Ok(()) => {
+                if record_history {
+                    self.back_stack.push(prior);
+                    self.fwd_stack.clear();
+                }
+            }
+            Err(err) => {
+                self.status = format!("Error: {err:#}");
+                self.cwd = prior;
+                let _ = self.reload();
+            }
+        }
+    }
+
+    fn go_back(&mut self) {
+        let Some(dir) = self.back_stack.pop() else {
+            self.status = "No previous directory".to_string();
+            return;
+        };
+        let prior = std::mem::replace(&mut self.cwd, dir);
+        match self.reload() {
+            Ok(()) => self.fwd_stack.push(prior),
+            Err(err) => {
+                self.status = format!("Error: {err:#}");
+                self.cwd = prior;
+                let _ = self.reload();
+            }
+        }
+    }
+
+    fn go_forward(&mut self) {
+        let Some(dir) = self.fwd_stack.pop() else {
+            self.status = "No next directory".to_string();
+            return;
+        };
+        let prior = std::mem::replace(&mut self.cwd, dir);
+        match self.reload() {
+            Ok(()) => self.back_stack.push(prior),
+            Err(err) => {
+                self.status = format!("Error: {err:#}");
+                self.cwd = prior;
+                let _ = self.reload();
+            }
+        }
     }
 
     fn is_remote(&self) -> bool {
@@ -272,12 +335,7 @@ impl FileManager {
                 .to_string_lossy()
                 .to_string()
         };
-        let prior = std::mem::replace(&mut self.cwd, new_cwd);
-        if let Err(err) = self.reload() {
-            self.status = format!("Error: {err:#}");
-            self.cwd = prior;
-            let _ = self.reload();
-        }
+        self.navigate_to(new_cwd, true);
     }
 
     fn go_parent(&mut self) {
@@ -289,12 +347,7 @@ impl FileManager {
                 .map(|p| p.to_string_lossy().to_string())
         };
         let Some(parent) = parent else { return };
-        let prior = std::mem::replace(&mut self.cwd, parent);
-        if let Err(err) = self.reload() {
-            self.status = format!("Error: {err:#}");
-            self.cwd = prior;
-            let _ = self.reload();
-        }
+        self.navigate_to(parent, true);
     }
 
     fn move_up(&mut self, count: usize) {
@@ -494,9 +547,9 @@ impl FileManager {
         };
 
         let help = if self.is_remote() {
-            "Enter/click: open  Backspace: up  d: download  u: upload  r: refresh  q: quit"
+            "click: open  BS: up  RClick: back  MClick: fwd  d: down  u: up  r: refresh  q: quit"
         } else {
-            "Enter/click: open  Backspace: up  r: refresh  q: quit (transfers need ssh domain)"
+            "click: open  BS: up  RClick: back  MClick: fwd  r: refresh  q: quit"
         };
 
         let mut changes = vec![
@@ -650,20 +703,39 @@ impl FileManager {
                 }
                 InputEvent::Mouse(MouseEvent {
                     y, mouse_buttons, ..
-                }) if mouse_buttons == MouseButtons::LEFT => {
-                    // mouse rows are 1-based
-                    let row = (y as usize).saturating_sub(1);
-                    if row >= HEADER_ROWS {
-                        let idx = self.top_row + (row - HEADER_ROWS);
-                        if idx < self.entries.len() {
-                            if idx == self.active_idx {
-                                // clicking the already-selected entry opens it
-                                self.status.clear();
-                                self.enter_selected();
-                            } else {
-                                self.active_idx = idx;
+                }) => {
+                    // Both the press and the release of a click carry the
+                    // button, so act only on the press edge.
+                    let newly = |b: MouseButtons| {
+                        mouse_buttons.contains(b.clone()) && !self.prev_mouse_buttons.contains(b)
+                    };
+                    let left_edge = newly(MouseButtons::LEFT);
+                    let right_edge = newly(MouseButtons::RIGHT);
+                    let middle_edge = newly(MouseButtons::MIDDLE);
+                    self.prev_mouse_buttons = mouse_buttons;
+
+                    if left_edge {
+                        let row = y as usize;
+                        if row >= HEADER_ROWS {
+                            let idx = self.top_row + (row - HEADER_ROWS);
+                            if idx < self.entries.len() {
+                                if idx == self.active_idx {
+                                    // clicking the already-selected entry opens it
+                                    self.status.clear();
+                                    self.enter_selected();
+                                } else {
+                                    self.active_idx = idx;
+                                }
                             }
                         }
+                    } else if right_edge {
+                        // browser-style back
+                        self.status.clear();
+                        self.go_back();
+                    } else if middle_edge {
+                        // browser-style forward
+                        self.status.clear();
+                        self.go_forward();
                     }
                 }
                 InputEvent::Resized { .. } => {}
