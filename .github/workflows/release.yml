@@ -20,16 +20,26 @@ on:
       - "v*"
       - "20*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          Version to release (e.g. v0.1.0). When set, the run creates the
+          tag and a versioned release instead of updating the nightly.
+        required: false
+        default: ""
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.ref }}-${{ inputs.version || '' }}
   cancel-in-progress: true
 
 env:
+  # A "versioned" run is either a tag push or a manual dispatch with a
+  # version input; anything else updates the rolling nightly release.
   # deploy.sh names assets "*-nightly*" when BUILD_REASON=Schedule,
   # giving stable filenames that `gh release upload --clobber` replaces.
-  BUILD_REASON: ${{ startsWith(github.ref, 'refs/tags/') && '' || 'Schedule' }}
-  TAG_NAME: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+  RELEASE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.version || '' }}
+  BUILD_REASON: ${{ (startsWith(github.ref, 'refs/tags/') || inputs.version != '') && ' ' || 'Schedule' }}
+  TAG_NAME: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.version || '' }}
 
 jobs:
   build-linux:
@@ -215,7 +225,7 @@ jobs:
             sha256sum "$f" > "$f.sha256"
           done
       - name: "Publish nightly release"
-        if: "!startsWith(github.ref, 'refs/tags/')"
+        if: "env.RELEASE_VERSION == ''"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -227,16 +237,19 @@ jobs:
               --notes "Rolling nightly build, automatically updated from the latest commit on main."
           bash ci/retry.sh gh release upload --clobber nightly \
             wezterm-*.deb wezterm-*.xz WezTerm-*.zip WezTerm-*.exe *.sha256
-      - name: "Publish tagged release"
-        if: "startsWith(github.ref, 'refs/tags/')"
+      - name: "Publish versioned release"
+        if: "env.RELEASE_VERSION != ''"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           shopt -s nullglob
-          tag="${{ github.ref_name }}"
+          tag="$RELEASE_VERSION"
+          # --target creates the tag at this commit when it doesn't exist
+          # yet (the manual-dispatch case)
           gh release view "$tag" || \
-            gh release create "$tag" --title "$tag" --generate-notes
+            gh release create "$tag" --title "$tag" --generate-notes \
+              --target "${{ github.sha }}"
           bash ci/retry.sh gh release upload --clobber "$tag" \
             wezterm-*.deb wezterm-*.xz WezTerm-*.zip WezTerm-*.exe *.sha256
