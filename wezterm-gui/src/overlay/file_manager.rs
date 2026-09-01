@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use termwiz::cell::{AttributeChange, CellAttributes};
 use termwiz::color::ColorAttribute;
-use termwiz::input::{InputEvent, KeyCode, KeyEvent, Modifiers};
+use termwiz::input::{InputEvent, KeyCode, KeyEvent, Modifiers, MouseButtons, MouseEvent};
 use termwiz::lineedit::{Action, BasicHistory, History, LineEditor, LineEditorHost};
 use termwiz::surface::{Change, Position};
 use termwiz::terminal::Terminal;
@@ -22,6 +22,8 @@ use wezterm_ssh::Sftp;
 const CHUNK_SIZE: usize = 128 * 1024;
 /// rows consumed by the header + status lines
 const ROW_OVERHEAD: usize = 3;
+/// number of rows above the file listing (location header + help line)
+const HEADER_ROWS: usize = 2;
 
 pub enum FileManagerBackend {
     Local,
@@ -492,9 +494,9 @@ impl FileManager {
         };
 
         let help = if self.is_remote() {
-            "Enter: open  Backspace: up  d: download  u: upload  r: refresh  q: quit"
+            "Enter/click: open  Backspace: up  d: download  u: upload  r: refresh  q: quit"
         } else {
-            "Enter: open  Backspace: up  r: refresh  q: quit (transfers need an ssh domain pane)"
+            "Enter/click: open  Backspace: up  r: refresh  q: quit (transfers need ssh domain)"
         };
 
         let mut changes = vec![
@@ -637,6 +639,32 @@ impl FileManager {
                 }) => {
                     self.upload(term);
                 }
+                InputEvent::Mouse(MouseEvent { mouse_buttons, .. })
+                    if mouse_buttons.contains(MouseButtons::VERT_WHEEL) =>
+                {
+                    if mouse_buttons.contains(MouseButtons::WHEEL_POSITIVE) {
+                        self.move_up(3);
+                    } else {
+                        self.move_down(3);
+                    }
+                }
+                InputEvent::Mouse(MouseEvent {
+                    y, mouse_buttons, ..
+                }) if mouse_buttons == MouseButtons::LEFT => {
+                    let row = y as usize;
+                    if row >= HEADER_ROWS {
+                        let idx = self.top_row + (row - HEADER_ROWS);
+                        if idx < self.entries.len() {
+                            if idx == self.active_idx {
+                                // clicking the already-selected entry opens it
+                                self.status.clear();
+                                self.enter_selected();
+                            } else {
+                                self.active_idx = idx;
+                            }
+                        }
+                    }
+                }
                 InputEvent::Resized { .. } => {}
                 _ => {}
             }
@@ -653,7 +681,6 @@ pub fn file_manager(
     backend: FileManagerBackend,
     start_dir: Option<String>,
 ) -> anyhow::Result<()> {
-    term.no_grab_mouse_in_raw_mode();
     term.render(&[Change::Title("File Manager".to_string())])?;
 
     let mut fm = match FileManager::new(backend, start_dir) {

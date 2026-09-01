@@ -2425,14 +2425,26 @@ impl TermWindow {
             }
         }
 
-        // The pane's OSC 7 cwd (if any) refers to the filesystem the pane's
-        // shell runs on, which matches the backend chosen above.
+        // The pane's cwd (OSC 7, or divined from the foreground process for
+        // local panes) refers to the filesystem the pane's shell runs on,
+        // which matches the backend chosen above. Fetch it fresh so a recent
+        // `cd` is reflected.
         let start_dir = pane
-            .get_current_working_dir(CachePolicy::AllowStale)
+            .get_current_working_dir(CachePolicy::FetchImmediate)
             .map(|url| {
-                percent_encoding::percent_decode_str(url.path())
+                let path = percent_encoding::percent_decode_str(url.path())
                     .decode_utf8_lossy()
-                    .to_string()
+                    .to_string();
+                // file:// URLs render windows drive paths as /C:/...
+                if cfg!(windows)
+                    && path.len() >= 3
+                    && path.starts_with('/')
+                    && path.as_bytes()[2] == b':'
+                {
+                    path[1..].to_string()
+                } else {
+                    path
+                }
             });
 
         // Open the file manager as a right-hand sidebar: a real split pane
