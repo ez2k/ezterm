@@ -45,6 +45,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.decide.outputs.version }}
+      # version without the leading "v": debian package versions must
+      # start with a digit, so the packaging TAG_NAME uses this form
+      numver: ${{ steps.decide.outputs.numver }}
     steps:
       - name: "checkout repo"
         uses: actions/checkout@v5
@@ -81,6 +84,7 @@ jobs:
             fi
           fi
           echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "numver=${ver#v}" >> "$GITHUB_OUTPUT"
           echo "release version: '$ver' (empty means nightly)"
 
   build-linux:
@@ -94,7 +98,7 @@ jobs:
       # deploy.sh names assets "*-nightly*" when BUILD_REASON=Schedule,
       # giving stable filenames that `gh release upload --clobber` replaces.
       BUILD_REASON: ${{ needs.meta.outputs.version == '' && 'Schedule' || ' ' }}
-      TAG_NAME: ${{ needs.meta.outputs.version }}
+      TAG_NAME: ${{ needs.meta.outputs.numver }}
     steps:
       - name: "set APT to non-interactive"
         shell: bash
@@ -159,7 +163,7 @@ jobs:
       RUSTC_WRAPPER: "sccache"
       MACOSX_DEPLOYMENT_TARGET: "10.12"
       BUILD_REASON: ${{ needs.meta.outputs.version == '' && 'Schedule' || ' ' }}
-      TAG_NAME: ${{ needs.meta.outputs.version }}
+      TAG_NAME: ${{ needs.meta.outputs.numver }}
     steps:
       - name: "checkout repo"
         uses: actions/checkout@v5
@@ -213,7 +217,7 @@ jobs:
       RUSTC_WRAPPER: "sccache"
       RUSTUP_WINDOWS_PATH_ADD_BIN: "1"
       BUILD_REASON: ${{ needs.meta.outputs.version == '' && 'Schedule' || ' ' }}
-      TAG_NAME: ${{ needs.meta.outputs.version }}
+      TAG_NAME: ${{ needs.meta.outputs.numver }}
     steps:
       - name: "checkout repo"
         uses: actions/checkout@v5
