@@ -279,9 +279,13 @@ jobs:
         shell: bash
         run: |
           shopt -s nullglob
+          notes=$(printf '%s\n\n%s\n%s' \
+            "Rolling nightly build, automatically updated from the latest commit on main." \
+            "Current build: #${{ github.run_number }} ($(date -u +'%Y-%m-%d %H:%M UTC'))" \
+            "Commit: ${{ github.sha }}")
           gh release view nightly || \
-            gh release create nightly --prerelease --title "Nightly" \
-              --notes "Rolling nightly build, automatically updated from the latest commit on main."
+            gh release create nightly --prerelease --title "Nightly" --notes "$notes"
+          gh release edit nightly --notes "$notes"
           bash ci/retry.sh gh release upload --clobber nightly \
             wezterm-*.deb wezterm-*.xz WezTerm-*.zip WezTerm-*.exe *.sha256
       - name: "Publish versioned release"
