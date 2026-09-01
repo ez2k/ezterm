@@ -2,14 +2,12 @@ name: release
 
 # Fork-friendly automated build + release workflow for ez2k/ezterm.
 #
-# - Push to `main`: builds all platforms and creates a new patch release
-#   (auto-bumped from the latest v* release; `.release-version` is the
-#   floor - bump it to jump minor/major) titled with the build date and
-#   run number. Falls back to updating the rolling `nightly` pre-release
-#   if no version can be determined.
-# - Push a tag matching `v*` or `20*`, or dispatch with a `version` input:
-#   builds all platforms and creates a release for exactly that version
-#   (creating the tag when needed).
+# - Push to `main`: builds all platforms and updates the rolling
+#   `nightly` pre-release with fresh assets.
+# - Bump `.release-version` (e.g. to v0.2.0), push a tag matching `v*`
+#   or `20*`, or dispatch with a `version` input: builds all platforms
+#   and creates a release for that version (creating the tag when
+#   needed), titled with the build date and run number.
 #
 # The upstream wezterm gen_* workflows gate their upload jobs on
 # `github.repository == 'wezterm/wezterm'` and depend on secrets
@@ -64,23 +62,13 @@ jobs:
             ver="$GITHUB_REF_NAME"
           elif [[ -n "$INPUT_VERSION" ]]; then
             ver="$INPUT_VERSION"
-          else
-            # Auto-bump the patch version on each push to main.
-            # .release-version acts as the floor (bump it to jump minor/major).
-            base=""
-            if [[ -f .release-version ]]; then
-              base=$(tr -d '[:space:]' < .release-version)
-            fi
-            latest=$(gh release list --limit 100 --json tagName --jq '.[].tagName' \
-              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
-            if [[ -z "$latest" ]]; then
-              ver="$base"
-            else
-              IFS=. read -r maj min pat <<<"${latest#v}"
-              ver="v$maj.$min.$((pat + 1))"
-              if [[ -n "$base" ]]; then
-                ver=$(printf '%s\n%s\n' "$ver" "$base" | sort -V | tail -1)
-              fi
+          elif [[ -f .release-version ]]; then
+            # A push releases the version named in .release-version only
+            # when that release does not exist yet; otherwise the push
+            # just updates the nightly.
+            file_ver=$(tr -d '[:space:]' < .release-version)
+            if [[ -n "$file_ver" ]] && ! gh release view "$file_ver" >/dev/null 2>&1; then
+              ver="$file_ver"
             fi
           fi
           echo "version=$ver" >> "$GITHUB_OUTPUT"
