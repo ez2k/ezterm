@@ -681,6 +681,10 @@ pub fn file_manager(
     backend: FileManagerBackend,
     start_dir: Option<String>,
 ) -> anyhow::Result<()> {
+    // Enables mouse reporting so clicks and wheel scrolling reach us;
+    // without this the pane never grabs the mouse and the GUI keeps
+    // mouse events for itself.
+    term.set_raw_mode()?;
     term.render(&[Change::Title("File Manager".to_string())])?;
 
     let mut fm = match FileManager::new(backend, start_dir) {
