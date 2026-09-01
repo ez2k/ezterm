@@ -4,8 +4,10 @@ name: release
 #
 # - Push to `main` (or manual dispatch): builds all platforms and updates
 #   the rolling `nightly` pre-release with fresh assets.
-# - Push a tag matching `v*` or `20*`: builds all platforms and creates a
-#   release for that tag with the packaged assets attached.
+# - Push a tag matching `v*` or `20*`, dispatch with a `version` input, or
+#   bump the version in the `.release-version` file at the repo root:
+#   builds all platforms and creates a versioned release (creating the tag
+#   when needed) with the packaged assets attached.
 #
 # The upstream wezterm gen_* workflows gate their upload jobs on
 # `github.repository == 'wezterm/wezterm'` and depend on secrets
@@ -32,23 +34,52 @@ concurrency:
   group: release-${{ github.ref }}-${{ inputs.version || '' }}
   cancel-in-progress: true
 
-env:
-  # A "versioned" run is either a tag push or a manual dispatch with a
-  # version input; anything else updates the rolling nightly release.
-  # deploy.sh names assets "*-nightly*" when BUILD_REASON=Schedule,
-  # giving stable filenames that `gh release upload --clobber` replaces.
-  RELEASE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.version || '' }}
-  BUILD_REASON: ${{ (startsWith(github.ref, 'refs/tags/') || inputs.version != '') && ' ' || 'Schedule' }}
-  TAG_NAME: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.version || '' }}
-
 jobs:
+  # Decides whether this run is a versioned release or a nightly update.
+  # A versioned run is a tag push, a dispatch with a version input, or a
+  # push where the `.release-version` file names a version that has no
+  # release yet.
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.decide.outputs.version }}
+    steps:
+      - name: "checkout repo"
+        uses: actions/checkout@v5
+      - name: "Decide release version"
+        id: decide
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          INPUT_VERSION: ${{ inputs.version || '' }}
+        shell: bash
+        run: |
+          ver=""
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            ver="$GITHUB_REF_NAME"
+          elif [[ -n "$INPUT_VERSION" ]]; then
+            ver="$INPUT_VERSION"
+          elif [[ -f .release-version ]]; then
+            file_ver=$(tr -d '[:space:]' < .release-version)
+            if [[ -n "$file_ver" ]] && ! gh release view "$file_ver" >/dev/null 2>&1; then
+              ver="$file_ver"
+            fi
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "release version: '$ver' (empty means nightly)"
+
   build-linux:
     runs-on: ubuntu-latest
     container: ubuntu:22.04
+    needs: meta
     env:
       CARGO_INCREMENTAL: "0"
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
+      # deploy.sh names assets "*-nightly*" when BUILD_REASON=Schedule,
+      # giving stable filenames that `gh release upload --clobber` replaces.
+      BUILD_REASON: ${{ needs.meta.outputs.version == '' && 'Schedule' || ' ' }}
+      TAG_NAME: ${{ needs.meta.outputs.version }}
     steps:
       - name: "set APT to non-interactive"
         shell: bash
@@ -106,11 +137,14 @@ jobs:
 
   build-macos:
     runs-on: macos-latest
+    needs: meta
     env:
       CARGO_INCREMENTAL: "0"
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
       MACOSX_DEPLOYMENT_TARGET: "10.12"
+      BUILD_REASON: ${{ needs.meta.outputs.version == '' && 'Schedule' || ' ' }}
+      TAG_NAME: ${{ needs.meta.outputs.version }}
     steps:
       - name: "checkout repo"
         uses: actions/checkout@v5
@@ -157,11 +191,14 @@ jobs:
 
   build-windows:
     runs-on: windows-2025
+    needs: meta
     env:
       CARGO_INCREMENTAL: "0"
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
       RUSTUP_WINDOWS_PATH_ADD_BIN: "1"
+      BUILD_REASON: ${{ needs.meta.outputs.version == '' && 'Schedule' || ' ' }}
+      TAG_NAME: ${{ needs.meta.outputs.version }}
     steps:
       - name: "checkout repo"
         uses: actions/checkout@v5
@@ -205,11 +242,14 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     needs:
+      - meta
       - build-linux
       - build-macos
       - build-windows
     permissions:
       contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.meta.outputs.version }}
     steps:
       - name: "checkout repo"
         uses: actions/checkout@v5
