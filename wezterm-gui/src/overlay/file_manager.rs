@@ -320,11 +320,13 @@ impl FileManager {
         self.entries.get(self.active_idx)
     }
 
-    fn enter_selected(&mut self) {
+    fn enter_selected(&mut self, term: &mut TermWizTerminalRef) {
         let Some(entry) = self.selected().cloned() else {
             return;
         };
         if !entry.is_dir {
+            // opening a file shows it in the viewer
+            self.view_selected(term);
             return;
         }
         let new_cwd = if self.is_remote() {
@@ -336,6 +338,72 @@ impl FileManager {
                 .to_string()
         };
         self.navigate_to(new_cwd, true);
+    }
+
+    /// Loads the selected file's content as lines of text
+    fn load_selected_file(&self) -> anyhow::Result<(String, Vec<String>)> {
+        const VIEW_MAX: u64 = 4 * 1024 * 1024;
+
+        let entry = self
+            .selected()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("nothing selected"))?;
+        if entry.is_dir {
+            anyhow::bail!("not a file");
+        }
+        if let Some(size) = entry.size {
+            if size > VIEW_MAX {
+                anyhow::bail!("{} is too large to view ({})", entry.name, human_size(size));
+            }
+        }
+
+        let bytes = match &self.backend {
+            FileManagerBackend::Local => std::fs::read(Path::new(&self.cwd).join(&entry.name))?,
+            FileManagerBackend::Remote { sftp, .. } => {
+                let sftp = sftp.clone();
+                let path = remote_join(&self.cwd, &entry.name);
+                smol::block_on(async {
+                    let mut file = sftp.open(path.as_str()).await?;
+                    let mut bytes = Vec::new();
+                    let mut buf = vec![0u8; CHUNK_SIZE];
+                    loop {
+                        let n = file.read(&mut buf).await?;
+                        if n == 0 {
+                            break;
+                        }
+                        bytes.extend_from_slice(&buf[..n]);
+                        if bytes.len() as u64 > VIEW_MAX {
+                            anyhow::bail!("{} is too large to view", entry.name);
+                        }
+                    }
+                    anyhow::Result::<Vec<u8>>::Ok(bytes)
+                })?
+            }
+        };
+
+        if bytes.iter().take(8192).any(|&b| b == 0) {
+            anyhow::bail!("{} looks like a binary file", entry.name);
+        }
+
+        let text = String::from_utf8_lossy(&bytes);
+        let lines = text
+            .lines()
+            .map(|line| line.replace('\t', "    "))
+            .collect();
+        Ok((entry.name, lines))
+    }
+
+    fn view_selected(&mut self, term: &mut TermWizTerminalRef) {
+        match self.load_selected_file() {
+            Ok((title, lines)) => {
+                if let Err(err) = viewer_loop(term, &title, &lines) {
+                    self.status = format!("Viewer error: {err:#}");
+                }
+            }
+            Err(err) => {
+                self.status = format!("{err:#}");
+            }
+        }
     }
 
     fn go_parent(&mut self) {
@@ -547,9 +615,9 @@ impl FileManager {
         };
 
         let help = if self.is_remote() {
-            "click: open  BS: up  RClick: back  MClick: fwd  d: down  u: up  r: refresh  q: quit"
+            "click/Enter: open-view  BS: up  RClick: back  d: down  u: up  r: refresh  q: quit"
         } else {
-            "click: open  BS: up  RClick: back  MClick: fwd  r: refresh  q: quit"
+            "click/Enter: open-view  BS: up  RClick: back  MClick: fwd  r: refresh  q: quit"
         };
 
         let mut changes = vec![
@@ -658,7 +726,7 @@ impl FileManager {
                     ..
                 }) => {
                     self.status.clear();
-                    self.enter_selected();
+                    self.enter_selected(term);
                 }
                 InputEvent::Key(KeyEvent {
                     key: KeyCode::Backspace,
@@ -722,7 +790,7 @@ impl FileManager {
                                 if idx == self.active_idx {
                                     // clicking the already-selected entry opens it
                                     self.status.clear();
-                                    self.enter_selected();
+                                    self.enter_selected(term);
                                 } else {
                                     self.active_idx = idx;
                                 }
@@ -748,6 +816,195 @@ impl FileManager {
 }
 
 use mux::termwiztermtab::TermWizTerminal as TermWizTerminalRef;
+
+/// A simple vi-style read-only file viewer:
+/// j/k or arrows scroll, CTRL-d/u half page, PageUp/PageDown/space full
+/// page, g/G jump to start/end, / searches, n/N next/previous match,
+/// q or Escape returns to the listing.
+fn viewer_loop(
+    term: &mut TermWizTerminalRef,
+    title: &str,
+    lines: &[String],
+) -> termwiz::Result<()> {
+    let mut top: usize = 0;
+    let mut pattern = String::new();
+
+    let render =
+        |term: &mut TermWizTerminalRef, top: usize, pattern: &str| -> termwiz::Result<()> {
+            let size = term.get_screen_size()?;
+            let content_rows = size.rows.saturating_sub(1);
+            let max_width = size.cols.saturating_sub(1);
+            let mut changes = vec![
+                Change::ClearScreen(ColorAttribute::Default),
+                Change::CursorPosition {
+                    x: Position::Absolute(0),
+                    y: Position::Absolute(0),
+                },
+                Change::AllAttributes(CellAttributes::default()),
+            ];
+            for line in lines.iter().skip(top).take(content_rows) {
+                changes.push(Change::Text(truncate_right(line, max_width)));
+                changes.push(Change::Text("\r\n".to_string()));
+            }
+            let percent = if lines.is_empty() {
+                100
+            } else {
+                ((top + content_rows).min(lines.len())) * 100 / lines.len()
+            };
+            let mut status = format!(
+                " {} - {}/{} ({}%)  j/k scroll  / search  q close ",
+                title,
+                (top + 1).min(lines.len().max(1)),
+                lines.len(),
+                percent
+            );
+            if !pattern.is_empty() {
+                status.push_str(&format!(" /{pattern}"));
+            }
+            changes.push(Change::CursorPosition {
+                x: Position::Absolute(0),
+                y: Position::Absolute(size.rows.saturating_sub(1)),
+            });
+            changes.push(AttributeChange::Reverse(true).into());
+            changes.push(Change::Text(truncate_right(&status, max_width)));
+            changes.push(AttributeChange::Reverse(false).into());
+            term.render(&changes)
+        };
+
+    let find = |from: usize, pattern: &str, forward: bool| -> Option<usize> {
+        if pattern.is_empty() {
+            return None;
+        }
+        if forward {
+            (from..lines.len()).find(|&i| lines[i].contains(pattern))
+        } else {
+            (0..from).rev().find(|&i| lines[i].contains(pattern))
+        }
+    };
+
+    render(term, top, &pattern)?;
+    while let Ok(Some(event)) = term.poll_input(None) {
+        let size = term.get_screen_size()?;
+        let content_rows = size.rows.saturating_sub(1).max(1);
+        let max_top = lines.len().saturating_sub(content_rows);
+        match event {
+            InputEvent::Key(KeyEvent {
+                key: KeyCode::Char('q'),
+                modifiers: Modifiers::NONE,
+            })
+            | InputEvent::Key(KeyEvent {
+                key: KeyCode::Escape,
+                ..
+            }) => break,
+            InputEvent::Key(KeyEvent {
+                key: KeyCode::Char('j'),
+                modifiers: Modifiers::NONE,
+            })
+            | InputEvent::Key(KeyEvent {
+                key: KeyCode::DownArrow,
+                ..
+            }) => top = (top + 1).min(max_top),
+            InputEvent::Key(KeyEvent {
+                key: KeyCode::Char('k'),
+                modifiers: Modifiers::NONE,
+            })
+            | InputEvent::Key(KeyEvent {
+                key: KeyCode::UpArrow,
+                ..
+            }) => top = top.saturating_sub(1),
+            InputEvent::Key(KeyEvent {
+                key: KeyCode::Char('D'),
+                modifiers: Modifiers::CTRL,
+            }) => top = (top + content_rows / 2).min(max_top),
+            InputEvent::Key(KeyEvent {
+                key: KeyCode::Char('U'),
+                modifiers: Modifiers::CTRL,
+            }) => top = top.saturating_sub(content_rows / 2),
+            InputEvent::Key(KeyEvent {
+                key: KeyCode::PageDown,
+                ..
+            })
+            | InputEvent::Key(KeyEvent {
+                key: KeyCode::Char(' '),
+                modifiers: Modifiers::NONE,
+            }) => top = (top + content_rows).min(max_top),
+            InputEvent::Key(KeyEvent {
+                key: KeyCode::PageUp,
+                ..
+            }) => top = top.saturating_sub(content_rows),
+            InputEvent::Key(KeyEvent {
+                key: KeyCode::Char('g'),
+                modifiers: Modifiers::NONE,
+            })
+            | InputEvent::Key(KeyEvent {
+                key: KeyCode::Home, ..
+            }) => top = 0,
+            InputEvent::Key(KeyEvent {
+                key: KeyCode::Char('G'),
+                ..
+            })
+            | InputEvent::Key(KeyEvent {
+                key: KeyCode::End, ..
+            }) => top = max_top,
+            InputEvent::Key(KeyEvent {
+                key: KeyCode::Char('/'),
+                modifiers: Modifiers::NONE,
+            }) => {
+                term.render(&[
+                    Change::CursorPosition {
+                        x: Position::Absolute(0),
+                        y: Position::Absolute(size.rows.saturating_sub(1)),
+                    },
+                    Change::ClearToEndOfLine(ColorAttribute::Default),
+                ])?;
+                let mut host = PathPromptHost {
+                    history: BasicHistory::default(),
+                };
+                let mut editor = LineEditor::new(term);
+                editor.set_prompt("/");
+                if let Ok(Some(line)) = editor.read_line(&mut host) {
+                    if !line.is_empty() {
+                        pattern = line;
+                        if let Some(hit) = find(top.saturating_add(1), &pattern, true)
+                            .or_else(|| find(0, &pattern, true))
+                        {
+                            top = hit.min(max_top);
+                        }
+                    }
+                }
+            }
+            InputEvent::Key(KeyEvent {
+                key: KeyCode::Char('n'),
+                modifiers: Modifiers::NONE,
+            }) => {
+                if let Some(hit) = find(top.saturating_add(1), &pattern, true) {
+                    top = hit.min(max_top);
+                }
+            }
+            InputEvent::Key(KeyEvent {
+                key: KeyCode::Char('N'),
+                ..
+            }) => {
+                if let Some(hit) = find(top, &pattern, false) {
+                    top = hit.min(max_top);
+                }
+            }
+            InputEvent::Mouse(MouseEvent { mouse_buttons, .. })
+                if mouse_buttons.contains(MouseButtons::VERT_WHEEL) =>
+            {
+                if mouse_buttons.contains(MouseButtons::WHEEL_POSITIVE) {
+                    top = top.saturating_sub(3);
+                } else {
+                    top = (top + 3).min(max_top);
+                }
+            }
+            InputEvent::Resized { .. } => {}
+            _ => {}
+        }
+        render(term, top, &pattern)?;
+    }
+    Ok(())
+}
 
 pub fn file_manager(
     mut term: TermWizTerminalRef,
