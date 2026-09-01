@@ -651,7 +651,8 @@ impl FileManager {
                 InputEvent::Mouse(MouseEvent {
                     y, mouse_buttons, ..
                 }) if mouse_buttons == MouseButtons::LEFT => {
-                    let row = y as usize;
+                    // mouse rows are 1-based
+                    let row = (y as usize).saturating_sub(1);
                     if row >= HEADER_ROWS {
                         let idx = self.top_row + (row - HEADER_ROWS);
                         if idx < self.entries.len() {
