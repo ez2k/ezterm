@@ -83,7 +83,7 @@ impl super::TermWindow {
             let left = border.left.get() as isize;
             if event.coords.x >= left && event.coords.x < left + sidebar_px {
                 if let WMEK::Press(MousePress::Left) = event.kind {
-                    let y = event.coords.y.sub(first_line_offset);
+                    let y = event.coords.y.sub(self.workspace_sidebar_top() as isize);
                     if y >= 0 {
                         let row = y as usize / self.render_metrics.cell_size.height as usize;
                         self.workspace_sidebar_click(row);

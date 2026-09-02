@@ -303,7 +303,8 @@ impl crate::TermWindow {
                 _ => 0.,
             })
             .sum();
-        let max_tab_width = ((self.dimensions.pixel_width as f32 / num_tabs)
+        let sidebar_px = self.workspace_sidebar_pixel_width() as f32;
+        let max_tab_width = (((self.dimensions.pixel_width as f32 - sidebar_px) / num_tabs)
             - (1.5 * metrics.cell_size.width as f32))
             .max(0.);
 
@@ -413,7 +414,9 @@ impl crate::TermWindow {
         let tabs = Element::new(&font, content)
             .display(DisplayType::Block)
             .item_type(UIItemType::TabBar(TabBarItem::None))
-            .min_width(Some(Dimension::Pixels(self.dimensions.pixel_width as f32)))
+            .min_width(Some(Dimension::Pixels(
+                self.dimensions.pixel_width as f32 - sidebar_px,
+            )))
             .min_height(Some(Dimension::Pixels(tab_bar_height)))
             .vertical_align(VerticalAlign::Bottom)
             .colors(bar_colors);
@@ -433,9 +436,11 @@ impl crate::TermWindow {
                     pixel_cell: metrics.cell_size.width as f32,
                 },
                 bounds: euclid::rect(
-                    border.left.get() as f32,
+                    border.left.get() as f32 + sidebar_px,
                     0.,
-                    self.dimensions.pixel_width as f32 - (border.left + border.right).get() as f32,
+                    self.dimensions.pixel_width as f32
+                        - (border.left + border.right).get() as f32
+                        - sidebar_px,
                     tab_bar_height,
                 ),
                 metrics: &metrics,

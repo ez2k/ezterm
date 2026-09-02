@@ -37,15 +37,10 @@ impl crate::TermWindow {
             .collect()
     }
 
-    /// The pixel y at which the sidebar starts (below a top tab bar)
-    fn workspace_sidebar_top(&self) -> f32 {
-        let border = self.get_os_border();
-        let tab_bar = if self.show_tab_bar && !self.config.tab_bar_at_bottom {
-            self.tab_bar_pixel_height().unwrap_or(0.)
-        } else {
-            0.
-        };
-        border.top.get() as f32 + tab_bar
+    /// The pixel y at which the sidebar starts: the very top of the
+    /// window, beside the tab bar, which is shifted right to make room.
+    pub fn workspace_sidebar_top(&self) -> f32 {
+        self.get_os_border().top.get() as f32
     }
 
     /// Handles a left click on the given sidebar row (0 = header)
@@ -83,13 +78,7 @@ impl crate::TermWindow {
         let cell_height = self.render_metrics.cell_size.height as f32;
         let cell_width = self.render_metrics.cell_size.width as f32;
         let top = self.workspace_sidebar_top();
-        let bottom = self.dimensions.pixel_height as f32
-            - border.bottom.get() as f32
-            - if self.show_tab_bar && self.config.tab_bar_at_bottom {
-                self.tab_bar_pixel_height().unwrap_or(0.)
-            } else {
-                0.
-            };
+        let bottom = self.dimensions.pixel_height as f32 - border.bottom.get() as f32;
         let rows = ((bottom - top) / cell_height).floor().max(0.) as usize;
         if rows == 0 {
             return Ok(());

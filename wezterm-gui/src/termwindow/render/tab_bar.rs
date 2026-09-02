@@ -36,12 +36,19 @@ impl crate::TermWindow {
             border.top.get() as f32
         };
 
+        // The tab bar sits to the right of the workspace sidebar
+        let sidebar_px = self.workspace_sidebar_pixel_width();
+
         // Register the tab bar location
-        self.ui_items.append(&mut self.tab_bar.compute_ui_items(
+        let mut items = self.tab_bar.compute_ui_items(
             tab_bar_y as usize,
             self.render_metrics.cell_size.height as usize,
             self.render_metrics.cell_size.width as usize,
-        ));
+        );
+        for item in items.iter_mut() {
+            item.x += sidebar_px;
+        }
+        self.ui_items.append(&mut items);
 
         let window_is_transparent =
             !self.window_background.is_empty() || self.config.window_background_opacity != 1.0;
@@ -60,15 +67,15 @@ impl crate::TermWindow {
         self.render_screen_line(
             RenderScreenLineParams {
                 top_pixel_y: tab_bar_y,
-                left_pixel_x: 0.,
-                pixel_width: self.dimensions.pixel_width as f32,
+                left_pixel_x: sidebar_px as f32,
+                pixel_width: (self.dimensions.pixel_width - sidebar_px) as f32,
                 stable_line_idx: None,
                 line: self.tab_bar.line(),
                 selection: 0..0,
                 cursor: &Default::default(),
                 palette: &palette,
                 dims: &RenderableDimensions {
-                    cols: self.dimensions.pixel_width
+                    cols: (self.dimensions.pixel_width - sidebar_px)
                         / self.render_metrics.cell_size.width as usize,
                     physical_top: 0,
                     scrollback_rows: 0,
