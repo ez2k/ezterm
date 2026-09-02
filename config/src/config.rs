@@ -514,6 +514,11 @@ pub struct Config {
     #[dynamic(default = "default_tab_max_width")]
     pub tab_max_width: usize,
 
+    /// Width, in cells, of the workspace sidebar shown on the left of the
+    /// window when toggled via the ShowWorkspaceSidebar action.
+    #[dynamic(default = "default_workspace_sidebar_width")]
+    pub workspace_sidebar_width: usize,
+
     /// If true, hide the tab bar if the window only has a single tab.
     #[dynamic(default)]
     pub hide_tab_bar_if_only_one_tab: bool,
@@ -1885,6 +1890,10 @@ fn default_enq_answerback() -> String {
 
 fn default_tab_max_width() -> usize {
     16
+}
+
+fn default_workspace_sidebar_width() -> usize {
+    20
 }
 
 fn default_update_interval() -> u64 {

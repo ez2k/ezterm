@@ -77,6 +77,23 @@ impl super::TermWindow {
 
         let (padding_left, padding_top) = self.padding_left_top();
 
+        // Clicks in the workspace sidebar are handled by the sidebar itself
+        if self.show_workspace_sidebar {
+            let sidebar_px = self.workspace_sidebar_pixel_width() as isize;
+            let left = border.left.get() as isize;
+            if event.coords.x >= left && event.coords.x < left + sidebar_px {
+                if let WMEK::Press(MousePress::Left) = event.kind {
+                    let y = event.coords.y.sub(first_line_offset);
+                    if y >= 0 {
+                        let row = y as usize / self.render_metrics.cell_size.height as usize;
+                        self.workspace_sidebar_click(row);
+                    }
+                }
+                context.set_cursor(Some(CursorIcon::Default));
+                return;
+            }
+        }
+
         let y = (event
             .coords
             .y

@@ -2,22 +2,15 @@
 
 {{since('nightly')}}
 
-Toggles a sidebar pane on the left side of the current tab (a
-full-height split taking 20% of the width) that lists the mux
-workspaces, with the number of windows in each and a `*` marker on
-the active workspace.
+Toggles a workspace sidebar on the left edge of the window. Like the tab
+bar, the sidebar is part of the window chrome rather than a pane: it spans
+the full height beside the panes and stays in place across tab and
+workspace switches.
 
-Keys and mouse:
-
-* `Enter`, or clicking the selected row - switch to that workspace
-* `Up`/`Down` or `k`/`j`, mouse wheel - move the selection
-* `n` - prompt for a name and create/switch to that workspace
-* `r` - refresh the listing
-* `q` / `Escape` - close the sidebar
-
-Invoking the assignment again while the sidebar is open closes it.
-Note that the sidebar pane lives in the tab it was opened from, so
-switching workspaces leaves it behind in the original workspace.
+Each row shows a workspace name and its window count; the active workspace
+is highlighted and marked with `*`. Clicking a row switches to that
+workspace. The width is controlled by
+[workspace_sidebar_width](../config/workspace_sidebar_width.md).
 
 ```lua
 config.keys = {
