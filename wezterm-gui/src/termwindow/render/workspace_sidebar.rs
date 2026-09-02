@@ -125,10 +125,15 @@ impl crate::TermWindow {
         let entries = self.workspace_sidebar_entries();
         let mut lines: Vec<(String, bool)> = Vec::with_capacity(rows);
         lines.push((fit(" Workspaces"), true));
-        for entry in &entries {
+        for (idx, entry) in entries.iter().enumerate() {
             let marker = if entry.is_active { "*" } else { " " };
             lines.push((
-                fit(&format!("{marker} {} ({})", entry.name, entry.windows)),
+                fit(&format!(
+                    "{marker}{:>2} {} ({})",
+                    idx + 1,
+                    entry.name,
+                    entry.windows
+                )),
                 entry.is_active,
             ));
         }

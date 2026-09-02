@@ -1917,6 +1917,18 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Window", "Workspace"],
             icon: None,
         },
+        SwitchToWorkspaceByIndex(n) => CommandDef {
+            brief: format!("Switch to workspace {}", n + 1).into(),
+            doc: format!(
+                "Switch to workspace number {} (ordered by name, as listed in the workspace sidebar)",
+                n + 1
+            )
+            .into(),
+            keys: vec![],
+            args: &[ArgType::ActivePane],
+            menubar: &[],
+            icon: None,
+        },
         SwitchWorkspaceRelative(n) => {
             let (direction, amount) = if *n < 0 {
                 ("previous", -n)
