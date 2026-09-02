@@ -616,6 +616,9 @@ pub enum KeyAssignment {
         spawn: Option<SpawnCommand>,
     },
     SwitchWorkspaceRelative(isize),
+    /// Switch to the Nth workspace (0-based), ordered by name as shown
+    /// in the workspace sidebar
+    SwitchToWorkspaceByIndex(usize),
 
     ActivateKeyTable {
         name: String,

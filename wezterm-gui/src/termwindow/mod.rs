@@ -3166,6 +3166,16 @@ impl TermWindow {
                     front_end().switch_workspace(w);
                 }
             }
+            SwitchToWorkspaceByIndex(idx) => {
+                let mux = Mux::get();
+                let mut workspaces = mux.iter_workspaces();
+                workspaces.sort();
+                if let Some(w) = workspaces.get(*idx) {
+                    if *w != mux.active_workspace() {
+                        front_end().switch_workspace(w);
+                    }
+                }
+            }
             SwitchToWorkspace { name, spawn } => {
                 let activity = crate::Activity::new();
                 let mux = Mux::get();
