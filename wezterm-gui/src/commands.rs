@@ -2011,6 +2011,16 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Edit"],
             icon: None,
         },
+        ShowWorkspaceSidebar => CommandDef {
+            brief: "Show workspace sidebar".into(),
+            doc: "Toggles a left-hand sidebar listing workspaces; \
+                Enter or click switches to the selected workspace"
+                .into(),
+            keys: vec![],
+            args: &[ArgType::ActivePane],
+            menubar: &["Window"],
+            icon: Some("md_dock_left"),
+        },
         ShowFileManager => CommandDef {
             brief: "Show file manager".into(),
             doc: "Activates the file manager overlay; browses the local \
@@ -2148,6 +2158,7 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         ShowLauncher,
         ShowTabNavigator,
         ShowFileManager,
+        ShowWorkspaceSidebar,
         // ----------------- Help
         OpenUri("https://wezterm.org/".to_string()),
         OpenUri("https://github.com/wezterm/wezterm/discussions/".to_string()),
