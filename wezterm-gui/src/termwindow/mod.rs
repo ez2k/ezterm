@@ -392,6 +392,8 @@ pub struct TermWindow {
     key_table_state: KeyTableState,
     show_tab_bar: bool,
     show_scroll_bar: bool,
+    /// whether the left-hand workspace sidebar is visible
+    show_workspace_sidebar: bool,
     tab_bar: TabBarState,
     fancy_tab_bar: Option<box_model::ComputedElement>,
     pub right_status: String,
@@ -714,6 +716,7 @@ impl TermWindow {
             dead_key_status: DeadKeyStatus::None,
             show_tab_bar,
             show_scroll_bar: config.enable_scroll_bar,
+            show_workspace_sidebar: false,
             tab_bar: TabBarState::default(),
             fancy_tab_bar: None,
             right_status: String::new(),
@@ -2384,87 +2387,25 @@ impl TermWindow {
         self.show_launcher_impl(args, active_tab_idx);
     }
 
+    /// Toggles the left-hand workspace sidebar. The sidebar is part of
+    /// the window chrome (like the tab bar) rather than a pane, so it
+    /// stays put across tab and workspace switches.
     fn show_workspace_sidebar(&mut self) {
-        use crate::overlay::workspace_sidebar;
-        let mux = Mux::get();
-        let tab = match mux.get_active_tab_for_window(self.mux_window_id) {
-            Some(tab) => tab,
-            None => return,
-        };
-
-        // Toggle: close an already-open sidebar in this tab.
-        if let Some(ws_pane_id) = crate::overlay::workspace_sidebar::take_sidebar(tab.tab_id()) {
-            if let Some(pos) = tab
-                .iter_panes_ignoring_zoom()
-                .iter()
-                .find(|p| p.pane.pane_id() == ws_pane_id)
-            {
-                pos.pane.kill();
-                mux.prune_dead_windows();
-                return;
-            }
+        self.show_workspace_sidebar = !self.show_workspace_sidebar;
+        // piggy back on the config reload path to recompute the layout
+        self.config_was_reloaded();
+        if let Some(window) = self.window.as_ref() {
+            window.invalidate();
         }
+    }
 
-        let pane = match self.get_active_pane_or_overlay() {
-            Some(pane) => pane,
-            None => return,
-        };
-        if tab.get_zoomed_pane().is_some() {
-            tab.set_zoomed(false);
+    /// Pixel width reserved on the left for the workspace sidebar
+    pub fn workspace_sidebar_pixel_width(&self) -> usize {
+        if self.show_workspace_sidebar {
+            self.config.workspace_sidebar_width * self.render_metrics.cell_size.width as usize
+        } else {
+            0
         }
-        let pane_index = match tab
-            .iter_panes_ignoring_zoom()
-            .iter()
-            .find(|p| p.pane.pane_id() == pane.pane_id())
-        {
-            Some(p) => p.index,
-            None => return,
-        };
-        let split_request = SplitRequest {
-            direction: SplitDirection::Horizontal,
-            // the sidebar becomes the first (left) half of the split
-            target_is_second: false,
-            top_level: true,
-            size: MuxSplitSize::Percent(20),
-        };
-        let split_size = match tab.compute_split_size(pane_index, split_request) {
-            Some(s) => s,
-            None => return,
-        };
-        let term_config: Arc<dyn wezterm_term::TerminalConfiguration + Send + Sync> =
-            Arc::new(config::TermConfig::with_config(self.config.clone()));
-        let (tw_term, tw_pane) = mux::termwiztermtab::allocate(split_size.first, term_config);
-        let sidebar_index =
-            match tab.split_and_insert(pane_index, split_request, Arc::clone(&tw_pane)) {
-                Ok(idx) => idx,
-                Err(err) => {
-                    log::error!("unable to split tab for workspace sidebar: {err:#}");
-                    tw_pane.kill();
-                    return;
-                }
-            };
-        tab.set_active_idx(sidebar_index);
-        let tab_id = tab.tab_id();
-        crate::overlay::workspace_sidebar::register_sidebar(tab_id, tw_pane.pane_id());
-
-        let window = self.window.clone().unwrap();
-        let pane_id = pane.pane_id();
-        let future = promise::spawn::spawn_into_new_thread(move || {
-            let res = workspace_sidebar(tw_term, window, pane_id);
-            promise::spawn::spawn_into_main_thread(async move {
-                crate::overlay::workspace_sidebar::unregister_sidebar(tab_id, tw_pane.pane_id());
-                tw_pane.kill();
-                Mux::get().prune_dead_windows();
-            })
-            .detach();
-            res
-        });
-        promise::spawn::spawn(async move {
-            if let Err(err) = future.await {
-                log::error!("workspace sidebar: {err:#}");
-            }
-        })
-        .detach();
     }
 
     fn show_file_manager(&mut self) {

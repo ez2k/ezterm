@@ -44,6 +44,7 @@ pub mod screen_line;
 pub mod split;
 pub mod tab_bar;
 pub mod window_buttons;
+pub mod workspace_sidebar;
 
 /// The data that we associate with a line; we use this to cache it shape hash
 #[derive(Debug)]
@@ -354,7 +355,8 @@ impl crate::TermWindow {
             .config
             .window_padding
             .left
-            .evaluate_as_pixels(h_context);
+            .evaluate_as_pixels(h_context)
+            + self.workspace_sidebar_pixel_width() as f32;
         let padding_right = self.config.window_padding.right;
         let padding_top = self.config.window_padding.top.evaluate_as_pixels(v_context);
         let padding_bottom = self

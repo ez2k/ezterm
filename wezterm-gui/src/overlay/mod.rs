@@ -15,7 +15,6 @@ pub mod launcher;
 pub mod prompt;
 pub mod quickselect;
 pub mod selector;
-pub mod workspace_sidebar;
 
 pub use confirm_close_pane::{
     confirm_close_pane, confirm_close_tab, confirm_close_window, confirm_quit_program,
@@ -25,7 +24,6 @@ pub use debug::show_debug_overlay;
 pub use file_manager::{file_manager, FileManagerBackend};
 pub use launcher::{launcher, LauncherArgs, LauncherFlags};
 pub use quickselect::QuickSelectOverlay;
-pub use workspace_sidebar::workspace_sidebar;
 
 pub fn start_overlay<T, F>(
     term_window: &TermWindow,
