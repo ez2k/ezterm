@@ -1992,7 +1992,8 @@ impl TermWindow {
         };
 
         let new_tab_bar = TabBarState::new(
-            self.dimensions.pixel_width / self.render_metrics.cell_size.width as usize,
+            (self.dimensions.pixel_width - self.workspace_sidebar_pixel_width())
+                / self.render_metrics.cell_size.width as usize,
             if hovering_in_tab_bar {
                 Some(self.last_mouse_coords.0)
             } else {
@@ -2394,6 +2395,7 @@ impl TermWindow {
         self.show_workspace_sidebar = !self.show_workspace_sidebar;
         // piggy back on the config reload path to recompute the layout
         self.config_was_reloaded();
+        self.invalidate_fancy_tab_bar();
         if let Some(window) = self.window.as_ref() {
             window.invalidate();
         }
