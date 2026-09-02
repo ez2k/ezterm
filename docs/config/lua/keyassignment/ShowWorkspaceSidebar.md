@@ -8,8 +8,10 @@ the full height beside the panes and stays in place across tab and
 workspace switches.
 
 Each row shows a workspace name and its window count; the active workspace
-is highlighted and marked with `*`. Clicking a row switches to that
-workspace. The width is controlled by
+is highlighted and marked with `*`, and each row is numbered to match
+[SwitchToWorkspaceByIndex](SwitchToWorkspaceByIndex.md). Clicking a row
+switches to that workspace; double-clicking prompts to rename it. The
+width is controlled by
 [workspace_sidebar_width](../config/workspace_sidebar_width.md).
 
 ```lua

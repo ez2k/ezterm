@@ -14,6 +14,7 @@ pub mod file_manager;
 pub mod launcher;
 pub mod prompt;
 pub mod quickselect;
+pub mod rename_workspace;
 pub mod selector;
 
 pub use confirm_close_pane::{

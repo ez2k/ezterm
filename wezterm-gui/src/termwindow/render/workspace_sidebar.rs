@@ -43,7 +43,9 @@ impl crate::TermWindow {
         self.get_os_border().top.get() as f32
     }
 
-    /// Handles a left click on the given sidebar row (0 = header)
+    /// Handles a left click on the given sidebar row (0 = header):
+    /// a single click switches to the workspace, a double click prompts
+    /// to rename it.
     pub fn workspace_sidebar_click(&mut self, row: usize) {
         if row < HEADER_ROWS {
             return;
@@ -52,6 +54,19 @@ impl crate::TermWindow {
         let Some(entry) = entries.get(row - HEADER_ROWS) else {
             return;
         };
+
+        let now = std::time::Instant::now();
+        let is_double = matches!(
+            self.workspace_sidebar_last_click,
+            Some((when, prev_row)) if prev_row == row
+                && now.duration_since(when) < std::time::Duration::from_millis(500)
+        );
+        self.workspace_sidebar_last_click = if is_double { None } else { Some((now, row)) };
+
+        if is_double {
+            self.workspace_sidebar_rename(entry.name.clone());
+            return;
+        }
         if entry.is_active {
             return;
         }
@@ -64,6 +79,22 @@ impl crate::TermWindow {
                 log::error!("workspace sidebar: {err:#}");
             }
         }
+    }
+
+    /// Opens an overlay prompting for a new name for the workspace
+    fn workspace_sidebar_rename(&mut self, old_name: String) {
+        let mux = Mux::get();
+        let Some(tab) = mux.get_active_tab_for_window(self.mux_window_id) else {
+            return;
+        };
+        let Some(window) = self.window.clone() else {
+            return;
+        };
+        let (overlay, future) = crate::overlay::start_overlay(self, &tab, move |_tab_id, term| {
+            crate::overlay::rename_workspace::rename_workspace_prompt(term, old_name, window)
+        });
+        self.assign_overlay(tab.tab_id(), overlay);
+        promise::spawn::spawn(future).detach();
     }
 
     pub fn paint_workspace_sidebar(

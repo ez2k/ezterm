@@ -394,6 +394,8 @@ pub struct TermWindow {
     show_scroll_bar: bool,
     /// whether the left-hand workspace sidebar is visible
     show_workspace_sidebar: bool,
+    /// last click in the workspace sidebar, for double-click detection
+    workspace_sidebar_last_click: Option<(std::time::Instant, usize)>,
     tab_bar: TabBarState,
     fancy_tab_bar: Option<box_model::ComputedElement>,
     pub right_status: String,
@@ -717,6 +719,7 @@ impl TermWindow {
             show_tab_bar,
             show_scroll_bar: config.enable_scroll_bar,
             show_workspace_sidebar: false,
+            workspace_sidebar_last_click: None,
             tab_bar: TabBarState::default(),
             fancy_tab_bar: None,
             right_status: String::new(),
