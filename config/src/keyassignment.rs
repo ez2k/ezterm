@@ -577,6 +577,26 @@ pub enum KeyAssignment {
     ShowDebugOverlay,
     ShowFileManager,
     ShowWorkspaceSidebar,
+    /// Shows a right-click style context menu for the active pane
+    /// at the current mouse position
+    ShowContextMenu,
+    /// Closes every tab in the window except the active one
+    CloseOtherTabs {
+        confirm: bool,
+    },
+    /// Closes every tab to the right of the active one
+    CloseTabsToTheRight {
+        confirm: bool,
+    },
+    /// Spawns a new tab in the same domain and working directory
+    /// as the active pane
+    DuplicateTab,
+    /// Detaches the active tab into a new window
+    MoveTabToNewWindow,
+    /// Prompts for a new title for the active tab
+    RenameTab,
+    /// Copies the active pane's working directory to the clipboard
+    CopyCurrentWorkingDir,
     HideApplication,
     QuitApplication,
     SpawnCommandInNewTab(SpawnCommand),
