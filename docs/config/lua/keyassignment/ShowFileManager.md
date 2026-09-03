@@ -32,3 +32,12 @@ config.keys = {
   { key = 'E', mods = 'CTRL', action = wezterm.action.ShowFileManager },
 }
 ```
+
+## Action menu
+
+Press `m`, or Shift/Ctrl + right-click a row, to open a small action
+menu for the selected entry: open or view it, download it (remote),
+upload a file here (remote), go to the parent directory, back, forward,
+refresh, or close the file manager. Navigate with the arrow keys or the
+mouse; `Escape` or a click outside dismisses it. A plain right click still
+goes back and a middle click still goes forward.
