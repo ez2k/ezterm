@@ -903,8 +903,14 @@ impl TermWindow {
                 myself.created(RenderContext::WebGpu(Rc::clone(&webgpu)))?;
             }
             myself.load_os_parameters();
+            if config.workspace_sidebar_default_show {
+                myself.show_workspace_sidebar();
+            }
             window.show();
             myself.subscribe_to_pane_updates();
+            if config.file_manager_default_show {
+                myself.auto_open_file_manager();
+            }
             myself.emit_window_event("window-config-reloaded", None);
             myself.emit_status_event();
         }
@@ -1299,6 +1305,9 @@ impl TermWindow {
                             log::debug!("fixup dpi in newly added tab");
                             tab.resize(self.terminal_size);
                         }
+                    }
+                    if self.config.file_manager_default_show {
+                        self.auto_open_file_manager();
                     }
                 }
                 MuxNotification::PaneOutput(pane_id) => {
@@ -2423,7 +2432,28 @@ impl TermWindow {
         }
     }
 
+    /// Opens the file manager sidebar in the active tab if it doesn't
+    /// have one yet, keeping keyboard focus on the current pane.
+    fn auto_open_file_manager(&mut self) {
+        let mux = Mux::get();
+        let Some(tab) = mux.get_active_tab_for_window(self.mux_window_id) else {
+            return;
+        };
+        if crate::overlay::file_manager::has_sidebar(tab.tab_id()) {
+            return;
+        }
+        // Only for tabs whose panes belong to us (not, eg, an overlay)
+        if tab.iter_panes_ignoring_zoom().is_empty() {
+            return;
+        }
+        self.show_file_manager_impl(false);
+    }
+
     fn show_file_manager(&mut self) {
+        self.show_file_manager_impl(true);
+    }
+
+    fn show_file_manager_impl(&mut self, focus_sidebar: bool) {
         use crate::overlay::{file_manager, FileManagerBackend};
         let mux = Mux::get();
         let tab = match mux.get_active_tab_for_window(self.mux_window_id) {
@@ -2521,7 +2551,15 @@ impl TermWindow {
                     return;
                 }
             };
-        tab.set_active_idx(sidebar_index);
+        if focus_sidebar {
+            tab.set_active_idx(sidebar_index);
+        } else if let Some(p) = tab
+            .iter_panes_ignoring_zoom()
+            .iter()
+            .find(|p| p.pane.pane_id() == pane.pane_id())
+        {
+            tab.set_active_idx(p.index);
+        }
         let tab_id = tab.tab_id();
         crate::overlay::file_manager::register_sidebar(tab_id, tw_pane.pane_id());
 

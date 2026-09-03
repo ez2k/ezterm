@@ -40,6 +40,11 @@ pub fn register_sidebar(tab_id: TabId, pane_id: PaneId) {
 }
 
 /// Removes and returns the sidebar pane registered for the tab, if any
+/// Whether the tab currently has a file manager sidebar registered
+pub fn has_sidebar(tab_id: TabId) -> bool {
+    OPEN_SIDEBARS.lock().unwrap().contains_key(&tab_id)
+}
+
 pub fn take_sidebar(tab_id: TabId) -> Option<PaneId> {
     OPEN_SIDEBARS.lock().unwrap().remove(&tab_id)
 }

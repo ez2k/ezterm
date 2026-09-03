@@ -72,7 +72,10 @@ Linux(`.deb`, `.tar.xz` / Ubuntu 22.04 기준 빌드), macOS(유니버설 `.zip`
 | `CloseTabsToTheRight { confirm }` | 오른쪽 탭 모두 닫기 |
 | `CopyCurrentWorkingDir` | 현재 페인의 작업 디렉터리를 클립보드로 |
 
-설정: `config.pane_drag_modifiers = "CTRL|ALT"` (페인 드래그 시작 조합키).
+설정:
+- `config.workspace_sidebar_default_show = true` — 새 창을 열 때 워크스페이스 사이드바를 바로 표시 (기본 켜짐).
+- `config.file_manager_default_show = true` — 새 탭마다 파일 매니저 사이드바를 바로 표시, 포커스는 쉘에 유지 (기본 켜짐).
+- `config.pane_drag_modifiers = "CTRL|ALT"` — 페인 드래그 시작 조합키.
 
 모두 커맨드 팔레트(`Ctrl+Shift+P`)에도 등록되어 있습니다.
 
