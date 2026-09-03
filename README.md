@@ -8,12 +8,16 @@
 
 <br clear="left">
 
+![ezterm — 왼쪽 워크스페이스 사이드바, 가운데 쉘, 오른쪽 파일 매니저](docs/screenshots/ezterm.png)
+
+*왼쪽에 워크스페이스 사이드바, 오른쪽에 파일 매니저가 기본으로 열린 모습. 둘 다 창 크롬처럼 항상 제자리에 있고, 우클릭 메뉴와 드래그로 탭·페인·워크스페이스를 정리할 수 있습니다.*
+
 ## 다운로드
 
 | 채널 | 설명 |
 |---|---|
 | [**Nightly**](https://github.com/ez2k/ezterm/releases/tag/nightly) | `main`에 머지될 때마다 자동 갱신. 릴리즈 설명에 빌드 번호·날짜·커밋이 표시됩니다. |
-| [**릴리즈**](https://github.com/ez2k/ezterm/releases) | 마일스톤마다 태그된 버전(예: `v0.1.0`). |
+| [**릴리즈**](https://github.com/ez2k/ezterm/releases) | 마일스톤마다 태그된 버전. 최신은 **v0.2.0**(컨텍스트 메뉴, 탭·페인 드래그, 사이드바 기본 표시). |
 
 Linux(`.deb`, `.tar.xz` / Ubuntu 22.04 기준 빌드), macOS(유니버설 `.zip`), Windows(`.zip`, 설치 프로그램 `.exe`)를 제공합니다. 각 파일에는 `.sha256` 체크섬이 함께 올라갑니다. macOS 빌드는 서명되어 있지 않으므로 처음 실행 시 우클릭 → 열기가 필요할 수 있습니다.
 
