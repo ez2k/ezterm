@@ -40,6 +40,7 @@ impl super::TermWindow {
                 self.update_title_post_status();
             }
             UIItemType::CloseTab(_)
+            | UIItemType::ContextMenuItem(_)
             | UIItemType::AboveScrollThumb
             | UIItemType::BelowScrollThumb
             | UIItemType::ScrollThumb
@@ -51,6 +52,7 @@ impl super::TermWindow {
         match item.item_type {
             UIItemType::TabBar(_) => {}
             UIItemType::CloseTab(_)
+            | UIItemType::ContextMenuItem(_)
             | UIItemType::AboveScrollThumb
             | UIItemType::BelowScrollThumb
             | UIItemType::ScrollThumb
@@ -233,6 +235,30 @@ impl super::TermWindow {
             None
         };
 
+        // While a context menu is open it owns the mouse: clicks on its
+        // items activate them, any other click dismisses it, and nothing
+        // reaches the tab bar or the terminal.
+        if self.context_menu_is_open() {
+            match (&event.kind, &ui_item) {
+                (
+                    WMEK::Press(MousePress::Left),
+                    Some(UIItem {
+                        item_type: UIItemType::ContextMenuItem(idx),
+                        ..
+                    }),
+                ) => {
+                    let idx = *idx;
+                    self.context_menu_activate(idx);
+                }
+                (WMEK::Press(_), _) => {
+                    self.cancel_modal();
+                }
+                _ => {}
+            }
+            context.set_cursor(Some(CursorIcon::Default));
+            return;
+        }
+
         if let Some(item) = ui_item.clone() {
             if capture_mouse {
                 self.current_mouse_capture = Some(MouseCapture::UI);
@@ -399,6 +425,9 @@ impl super::TermWindow {
             UIItemType::CloseTab(idx) => {
                 self.mouse_event_close_tab(idx, event, context);
             }
+            UIItemType::ContextMenuItem(_) => {
+                // handled in mouse_event_impl while the menu is open
+            }
         }
     }
 
@@ -540,8 +569,10 @@ impl super::TermWindow {
                 | TabBarItem::WindowButton(_) => {}
             },
             WMEK::Press(MousePress::Right) => match item {
-                TabBarItem::Tab { .. } => {
-                    self.show_tab_navigator();
+                TabBarItem::Tab { tab_idx, .. } => {
+                    self.show_context_menu(crate::termwindow::context_menu::ContextMenuKind::Tab(
+                        tab_idx,
+                    ));
                 }
                 TabBarItem::NewTabButton { .. } => {
                     self.do_new_tab_button_click(MousePress::Right);

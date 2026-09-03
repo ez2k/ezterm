@@ -49,6 +49,31 @@ pub fn confirm_close_tab(
     Ok(())
 }
 
+/// Confirms closing several tabs at once (eg: "close other tabs")
+pub fn confirm_close_tabs(
+    tab_ids: Vec<TabId>,
+    mut term: TermWizTerminal,
+    window: ::window::Window,
+    active_tab_id: TabId,
+) -> anyhow::Result<()> {
+    let n = tab_ids.len();
+    if confirm::run_confirmation(
+        &format!("🛑 Really kill {n} tab(s) and all contained panes?"),
+        &mut term,
+    )? {
+        promise::spawn::spawn_into_main_thread(async move {
+            let mux = Mux::get();
+            for tab_id in tab_ids {
+                mux.remove_tab(tab_id);
+            }
+        })
+        .detach();
+    }
+    TermWindow::schedule_cancel_overlay(window, active_tab_id, None);
+
+    Ok(())
+}
+
 pub fn confirm_close_window(
     mut term: TermWizTerminal,
     mux_window_id: WindowId,

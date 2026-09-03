@@ -2033,6 +2033,84 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Window"],
             icon: Some("md_dock_left"),
         },
+        ShowContextMenu => CommandDef {
+            brief: "Show context menu".into(),
+            doc: "Shows a right-click context menu at the mouse position".into(),
+            keys: vec![],
+            args: &[ArgType::ActivePane],
+            menubar: &["Edit"],
+            icon: Some("md_menu"),
+        },
+        CloseOtherTabs { confirm: true } => CommandDef {
+            brief: "Close other tabs".into(),
+            doc: "Closes every tab in this window except the current one, \
+                prompting for confirmation if needed"
+                .into(),
+            keys: vec![],
+            args: &[ArgType::ActiveWindow],
+            menubar: &["Shell"],
+            icon: Some("md_close_box_multiple"),
+        },
+        CloseOtherTabs { confirm: false } => CommandDef {
+            brief: "Close other tabs without confirmation".into(),
+            doc: "Closes every tab in this window except the current one".into(),
+            keys: vec![],
+            args: &[ArgType::ActiveWindow],
+            menubar: &[],
+            icon: Some("md_close_box_multiple"),
+        },
+        CloseTabsToTheRight { confirm: true } => CommandDef {
+            brief: "Close tabs to the right".into(),
+            doc: "Closes every tab to the right of the current one, \
+                prompting for confirmation if needed"
+                .into(),
+            keys: vec![],
+            args: &[ArgType::ActiveWindow],
+            menubar: &["Shell"],
+            icon: Some("md_close_box_multiple_outline"),
+        },
+        CloseTabsToTheRight { confirm: false } => CommandDef {
+            brief: "Close tabs to the right without confirmation".into(),
+            doc: "Closes every tab to the right of the current one".into(),
+            keys: vec![],
+            args: &[ArgType::ActiveWindow],
+            menubar: &[],
+            icon: Some("md_close_box_multiple_outline"),
+        },
+        DuplicateTab => CommandDef {
+            brief: "Duplicate tab".into(),
+            doc: "Spawns a new tab in the same domain and working directory \
+                as the current pane"
+                .into(),
+            keys: vec![],
+            args: &[ArgType::ActivePane],
+            menubar: &["Shell"],
+            icon: Some("md_content_duplicate"),
+        },
+        MoveTabToNewWindow => CommandDef {
+            brief: "Move tab to new window".into(),
+            doc: "Detaches the current tab into a new window".into(),
+            keys: vec![],
+            args: &[ArgType::ActiveWindow],
+            menubar: &["Window", "Move Tab"],
+            icon: Some("md_open_in_new"),
+        },
+        RenameTab => CommandDef {
+            brief: "Rename tab".into(),
+            doc: "Prompts for a new title for the current tab".into(),
+            keys: vec![],
+            args: &[ArgType::ActiveWindow],
+            menubar: &["Shell"],
+            icon: Some("md_rename_box"),
+        },
+        CopyCurrentWorkingDir => CommandDef {
+            brief: "Copy working directory".into(),
+            doc: "Copies the current pane's working directory to the clipboard".into(),
+            keys: vec![],
+            args: &[ArgType::ActivePane],
+            menubar: &["Edit"],
+            icon: Some("md_folder_arrow_right"),
+        },
         ShowFileManager => CommandDef {
             brief: "Show file manager".into(),
             doc: "Activates the file manager overlay; browses the local \
@@ -2171,6 +2249,13 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         ShowTabNavigator,
         ShowFileManager,
         ShowWorkspaceSidebar,
+        ShowContextMenu,
+        DuplicateTab,
+        RenameTab,
+        CloseOtherTabs { confirm: true },
+        CloseTabsToTheRight { confirm: true },
+        MoveTabToNewWindow,
+        CopyCurrentWorkingDir,
         // ----------------- Help
         OpenUri("https://wezterm.org/".to_string()),
         OpenUri("https://github.com/wezterm/wezterm/discussions/".to_string()),

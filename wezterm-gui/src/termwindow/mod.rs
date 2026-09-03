@@ -72,6 +72,7 @@ pub mod background;
 pub mod box_model;
 pub mod charselect;
 pub mod clipboard;
+pub mod context_menu;
 pub mod keyevent;
 pub mod modal;
 mod mouseevent;
@@ -155,6 +156,7 @@ pub enum TermWindowNotif {
 pub enum UIItemType {
     TabBar(TabBarItem),
     CloseTab(usize),
+    ContextMenuItem(usize),
     AboveScrollThumb,
     ScrollThumb,
     BelowScrollThumb,
@@ -2928,6 +2930,13 @@ impl TermWindow {
             ShowDebugOverlay => self.show_debug_overlay(),
             ShowFileManager => self.show_file_manager(),
             ShowWorkspaceSidebar => self.show_workspace_sidebar(),
+            ShowContextMenu => self.show_context_menu(context_menu::ContextMenuKind::Terminal),
+            CloseOtherTabs { confirm } => self.close_other_tabs(*confirm),
+            CloseTabsToTheRight { confirm } => self.close_tabs_to_the_right(*confirm),
+            DuplicateTab => self.duplicate_tab(),
+            MoveTabToNewWindow => self.move_tab_to_new_window(),
+            RenameTab => self.rename_tab(),
+            CopyCurrentWorkingDir => self.copy_current_working_dir(pane),
             ShowLauncher => self.show_launcher(),
             ShowLauncherArgs(args) => {
                 let title = args.title.clone().unwrap_or("Launcher".to_string());
