@@ -524,6 +524,15 @@ pub struct Config {
     #[dynamic(default = "default_workspace_sidebar_width")]
     pub workspace_sidebar_width: usize,
 
+    /// If true, new windows open with the workspace sidebar visible.
+    #[dynamic(default = "crate::default_true")]
+    pub workspace_sidebar_default_show: bool,
+
+    /// If true, every new tab opens with the file manager sidebar
+    /// visible on its right-hand side.
+    #[dynamic(default = "crate::default_true")]
+    pub file_manager_default_show: bool,
+
     /// If true, hide the tab bar if the window only has a single tab.
     #[dynamic(default)]
     pub hide_tab_bar_if_only_one_tab: bool,
