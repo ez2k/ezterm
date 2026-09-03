@@ -226,8 +226,7 @@ impl ContextMenu {
                     height: Dimension::Cells(0.25),
                     poly: BOTTOM_RIGHT_ROUNDED_CORNER,
                 },
-            }))
-            .zindex(100);
+            }));
 
         let dimensions = term_window.dimensions;
         let win_w = dimensions.pixel_width as f32;
