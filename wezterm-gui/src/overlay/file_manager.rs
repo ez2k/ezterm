@@ -1046,7 +1046,7 @@ impl FileManager {
             .skip(self.top_row)
             .enumerate()
         {
-            if row_num > self.max_items {
+            if row_num >= self.max_items {
                 break;
             }
             if entry_idx == self.active_idx {
@@ -1078,6 +1078,16 @@ impl FileManager {
     fn run_loop(&mut self, term: &mut TermWizTerminalRef) -> anyhow::Result<()> {
         self.render(term)?;
         while let Ok(Some(event)) = term.poll_input(None) {
+            // Plain pointer motion (no buttons, no wheel) changes nothing;
+            // skip it rather than repainting the whole listing.
+            if let InputEvent::Mouse(MouseEvent { mouse_buttons, .. }) = &event {
+                if mouse_buttons.is_empty()
+                    && self.prev_mouse_buttons.is_empty()
+                    && self.menu.is_none()
+                {
+                    continue;
+                }
+            }
             if self.menu.is_some() {
                 if self.handle_menu_input(term, event) {
                     break;
@@ -1440,6 +1450,8 @@ fn viewer_loop(
                     top = (top + 3).min(max_top);
                 }
             }
+            // pointer motion and button events don't change the view
+            InputEvent::Mouse(_) => continue,
             InputEvent::Resized { .. } => {}
             _ => {}
         }

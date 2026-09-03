@@ -372,7 +372,7 @@ impl TermWindow {
                 bottom: Dimension::Cells(0.1),
             })
             .border(BoxDimension::new(Dimension::Pixels(1.)))
-            .zindex(110);
+            .zindex(2);
         self.paint_floating_element(&font, element, x + 12., y + 12.)
     }
 
@@ -406,7 +406,7 @@ impl TermWindow {
                 ),
                 metrics: &metrics,
                 gl_state: self.render_state.as_ref().unwrap(),
-                zindex: 105,
+                zindex: 100,
             },
             &element,
         )?;
@@ -458,7 +458,7 @@ impl TermWindow {
                 })
                 .min_width(Some(Dimension::Pixels(3.)))
                 .max_width(Some(Dimension::Pixels(3.)))
-                .zindex(105);
+                .zindex(1);
             self.paint_floating_element(&font, marker, (x - 1.5).max(0.), bar_top)?;
         }
 
@@ -480,7 +480,7 @@ impl TermWindow {
                 })
                 .border(BoxDimension::new(Dimension::Pixels(1.)))
                 .min_width(Some(Dimension::Pixels(*width)))
-                .zindex(105);
+                .zindex(1);
             self.paint_floating_element(&font, hl, *x, bar_top)?;
         }
 
@@ -509,7 +509,7 @@ impl TermWindow {
             .min_width(Some(Dimension::Pixels(
                 self.workspace_sidebar_pixel_width() as f32,
             )))
-            .zindex(105);
+            .zindex(1);
         self.paint_floating_element(&font, element, border.left.get() as f32, top)
     }
 }
