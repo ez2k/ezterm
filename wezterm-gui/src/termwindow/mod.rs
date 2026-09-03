@@ -77,6 +77,7 @@ pub mod keyevent;
 pub mod modal;
 mod mouseevent;
 pub mod palette;
+pub mod pane_drag;
 pub mod paneselect;
 mod prevcursor;
 pub mod render;
@@ -452,6 +453,8 @@ pub struct TermWindow {
     dragging: Option<(UIItem, MouseEvent)>,
     /// a tab being dragged with the mouse
     tab_drag: Option<tab_drag::TabDrag>,
+    /// a pane being dragged with the mouse
+    pane_drag: Option<pane_drag::PaneDrag>,
 
     modal: RefCell<Option<Rc<dyn Modal>>>,
 
@@ -799,6 +802,7 @@ impl TermWindow {
             ui_items: vec![],
             dragging: None,
             tab_drag: None,
+            pane_drag: None,
             last_ui_item: None,
             is_click_to_focus_window: false,
             key_table_state: KeyTableState::default(),

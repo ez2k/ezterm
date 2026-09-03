@@ -268,11 +268,12 @@ impl super::TermWindow {
             }
         }
 
-        if is_down && self.tab_drag_is_active() {
+        if is_down && (self.tab_drag_is_active() || self.pane_drag_is_active()) {
             if let Key::Code(termwiz::input::KeyCode::Escape) =
                 self.win_key_code_to_termwiz_key_code(keycode)
             {
                 self.cancel_tab_drag();
+                self.cancel_pane_drag();
                 return true;
             }
         }

@@ -428,6 +428,11 @@ pub struct Config {
     #[dynamic(default = "default_bypass_mouse_reporting_modifiers")]
     pub bypass_mouse_reporting_modifiers: Modifiers,
 
+    /// Holding these modifiers while pressing the left mouse button in a
+    /// pane starts dragging the pane
+    #[dynamic(default = "default_pane_drag_modifiers")]
+    pub pane_drag_modifiers: Modifiers,
+
     #[dynamic(default)]
     pub debug_key_events: bool,
 
@@ -1803,6 +1808,10 @@ pub fn default_local_echo_threshold_ms() -> Option<u64> {
 
 fn default_bypass_mouse_reporting_modifiers() -> Modifiers {
     Modifiers::SHIFT
+}
+
+fn default_pane_drag_modifiers() -> Modifiers {
+    Modifiers::CTRL | Modifiers::ALT
 }
 
 fn default_gui_startup_args() -> Vec<String> {

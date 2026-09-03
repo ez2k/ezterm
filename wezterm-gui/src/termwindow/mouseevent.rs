@@ -244,6 +244,29 @@ impl super::TermWindow {
             }
         }
 
+        // Likewise for a pane drag
+        if self.pane_drag.is_some() {
+            match &event.kind {
+                WMEK::Move => {
+                    if self.update_pane_drag(&event, context) {
+                        return;
+                    }
+                }
+                WMEK::Release(MousePress::Left) => {
+                    let was_active = self.pane_drag_is_active();
+                    self.finish_pane_drag(&event);
+                    self.current_mouse_capture = None;
+                    context.set_cursor(Some(CursorIcon::Default));
+                    let _ = was_active;
+                    return;
+                }
+                WMEK::Press(_) => {
+                    self.cancel_pane_drag();
+                }
+                _ => {}
+            }
+        }
+
         let prior_ui_item = self.last_ui_item.clone();
 
         let ui_item = if matches!(self.current_mouse_capture, None | Some(MouseCapture::UI)) {
@@ -306,6 +329,17 @@ impl super::TermWindow {
             self.current_mouse_capture,
             None | Some(MouseCapture::TerminalPane(_))
         ) {
+            // modifier + left press on a pane starts dragging it
+            if let WMEK::Press(MousePress::Left) = &event.kind {
+                let mods = self.config.pane_drag_modifiers;
+                if !mods.is_empty()
+                    && event.modifiers.remove_positional_mods() == mods
+                    && self.begin_pane_drag(&event)
+                {
+                    self.current_mouse_capture = Some(MouseCapture::UI);
+                    return;
+                }
+            }
             self.mouse_event_terminal(
                 pane,
                 ClickPosition {
