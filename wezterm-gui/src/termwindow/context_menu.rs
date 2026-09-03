@@ -699,6 +699,11 @@ impl TermWindow {
     /// Detaches the active tab into a brand new window in the same
     /// workspace
     pub fn move_tab_to_new_window(&mut self) {
+        self.move_tab_to_new_window_at(None);
+    }
+
+    /// As `move_tab_to_new_window`, placing the new window at `position`
+    pub fn move_tab_to_new_window_at(&mut self, position: Option<config::GuiPosition>) {
         let mux = Mux::get();
         let (tab, workspace) = {
             let mut window = match mux.get_window_mut(self.mux_window_id) {
@@ -713,7 +718,7 @@ impl TermWindow {
             let workspace = window.get_workspace().to_string();
             (window.remove_tab_idx(idx), workspace)
         };
-        let new_window = mux.new_empty_window(Some(workspace), None);
+        let new_window = mux.new_empty_window(Some(workspace), position);
         if let Err(err) = mux.add_tab_to_window(&tab, *new_window) {
             log::error!("move_tab_to_new_window: {err:#}");
         }

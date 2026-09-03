@@ -268,6 +268,15 @@ impl super::TermWindow {
             }
         }
 
+        if is_down && self.tab_drag_is_active() {
+            if let Key::Code(termwiz::input::KeyCode::Escape) =
+                self.win_key_code_to_termwiz_key_code(keycode)
+            {
+                self.cancel_tab_drag();
+                return true;
+            }
+        }
+
         if is_down {
             if only_key_bindings == OnlyKeyBindings::No {
                 if let Some(modal) = self.get_modal() {

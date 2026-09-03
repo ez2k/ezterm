@@ -220,6 +220,30 @@ impl super::TermWindow {
             _ => {}
         }
 
+        // A tab drag in progress owns the pointer until release
+        if self.tab_drag.is_some() {
+            match &event.kind {
+                WMEK::Move => {
+                    if self.update_tab_drag(&event, context) {
+                        return;
+                    }
+                }
+                WMEK::Release(MousePress::Left) => {
+                    let was_active = self.tab_drag_is_active();
+                    self.finish_tab_drag(&event);
+                    if was_active {
+                        self.current_mouse_capture = None;
+                        context.set_cursor(Some(CursorIcon::Default));
+                        return;
+                    }
+                }
+                WMEK::Press(_) => {
+                    self.cancel_tab_drag();
+                }
+                _ => {}
+            }
+        }
+
         let prior_ui_item = self.last_ui_item.clone();
 
         let ui_item = if matches!(self.current_mouse_capture, None | Some(MouseCapture::UI)) {
@@ -523,6 +547,7 @@ impl super::TermWindow {
             WMEK::Press(MousePress::Left) => match item {
                 TabBarItem::Tab { tab_idx, .. } => {
                     self.activate_tab(tab_idx as isize).ok();
+                    self.begin_tab_drag(tab_idx, &event);
                 }
                 TabBarItem::NewTabButton { .. } => {
                     self.do_new_tab_button_click(MousePress::Left);
