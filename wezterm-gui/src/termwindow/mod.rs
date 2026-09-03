@@ -83,6 +83,7 @@ pub mod render;
 pub mod resize;
 mod selection;
 pub mod spawn;
+pub mod tab_drag;
 pub mod webgpu;
 use crate::spawn::SpawnWhere;
 use prevcursor::PrevCursorPos;
@@ -449,6 +450,8 @@ pub struct TermWindow {
 
     ui_items: Vec<UIItem>,
     dragging: Option<(UIItem, MouseEvent)>,
+    /// a tab being dragged with the mouse
+    tab_drag: Option<tab_drag::TabDrag>,
 
     modal: RefCell<Option<Rc<dyn Modal>>>,
 
@@ -795,6 +798,7 @@ impl TermWindow {
             semantic_zones: HashMap::new(),
             ui_items: vec![],
             dragging: None,
+            tab_drag: None,
             last_ui_item: None,
             is_click_to_focus_window: false,
             key_table_state: KeyTableState::default(),
