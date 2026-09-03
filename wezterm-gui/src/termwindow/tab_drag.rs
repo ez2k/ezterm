@@ -33,6 +33,12 @@ pub enum TabDropTarget {
         insert_idx: usize,
         x: f32,
     },
+    /// Merge the dragged tab's panes into this tab (Shift held)
+    Merge {
+        tab_idx: usize,
+        x: f32,
+        width: f32,
+    },
     /// Move to this workspace (sidebar row)
     Workspace {
         name: String,
@@ -165,6 +171,20 @@ impl TermWindow {
         }
 
         let xf = x as f32;
+
+        // Shift + drop on another tab merges into it
+        if event.modifiers.contains(window::Modifiers::SHIFT) {
+            for (idx, left, right, _) in &tabs {
+                if *idx != drag.tab_idx && xf >= *left && xf < *right {
+                    return TabDropTarget::Merge {
+                        tab_idx: *idx,
+                        x: *left,
+                        width: right - left,
+                    };
+                }
+            }
+        }
+
         let mut target = None;
         for (idx, left, right, _) in &tabs {
             if xf < (left + right) / 2. {
@@ -205,6 +225,9 @@ impl TermWindow {
                     }
                 }
             }
+            TabDropTarget::Merge { tab_idx, .. } => {
+                self.merge_tab_into(drag.tab_id, tab_idx);
+            }
             TabDropTarget::Workspace { name, .. } => {
                 self.move_tab_to_workspace(drag.tab_id, &name);
             }
@@ -221,6 +244,58 @@ impl TermWindow {
         }
         if let Some(window) = self.window.as_ref() {
             window.invalidate();
+        }
+    }
+
+    /// Moves every pane of `src_tab_id` into the tab at `dest_idx` of
+    /// this window (each split beside that tab's active pane) and
+    /// removes the now-empty source tab.
+    pub fn merge_tab_into(&mut self, src_tab_id: TabId, dest_idx: usize) {
+        let mux = Mux::get();
+        let Some(src) = mux.get_tab(src_tab_id) else {
+            return;
+        };
+        let Some(dest) = mux
+            .get_window(self.mux_window_id)
+            .and_then(|w| w.get_tab_at_idx(dest_idx).map(std::sync::Arc::clone))
+        else {
+            return;
+        };
+        if dest.tab_id() == src_tab_id {
+            return;
+        }
+        src.set_zoomed(false);
+        dest.set_zoomed(false);
+        let panes: Vec<_> = src
+            .iter_panes_ignoring_zoom()
+            .into_iter()
+            .map(|p| p.pane)
+            .collect();
+        for pane in panes {
+            let Some(pane) = src.remove_pane(pane.pane_id()) else {
+                continue;
+            };
+            let active = dest.get_active_idx();
+            match dest.split_and_insert(
+                active,
+                mux::tab::SplitRequest {
+                    direction: mux::tab::SplitDirection::Horizontal,
+                    target_is_second: true,
+                    top_level: false,
+                    size: mux::tab::SplitSize::Percent(50),
+                },
+                pane,
+            ) {
+                Ok(idx) => dest.set_active_idx(idx),
+                Err(err) => log::error!("merge_tab_into: {err:#}"),
+            }
+        }
+        mux.remove_tab(src_tab_id);
+        let window = mux.get_window_mut(self.mux_window_id);
+        if let Some(mut window) = window {
+            if let Some(i) = window.get_tab_idx_for_id(dest.tab_id()) {
+                window.set_active_tab_idx_without_saving(i);
+            }
         }
     }
 
@@ -358,6 +433,9 @@ impl TermWindow {
         let label = match &target {
             TabDropTarget::NewWindow { .. } => format!("{title}  → new window"),
             TabDropTarget::Workspace { name, .. } => format!("{title}  → {name}"),
+            TabDropTarget::Merge { tab_idx, .. } => {
+                format!("{title}  → merge into tab {}", tab_idx + 1)
+            }
             _ => title.clone(),
         };
         self.paint_drag_ghost(label, current.coords.x as f32, current.coords.y as f32)?;
@@ -382,6 +460,28 @@ impl TermWindow {
                 .max_width(Some(Dimension::Pixels(3.)))
                 .zindex(105);
             self.paint_floating_element(&font, marker, (x - 1.5).max(0.), bar_top)?;
+        }
+
+        // Highlight the tab being merged into
+        if let TabDropTarget::Merge { x, width, .. } = &target {
+            let bar_top = self
+                .ui_items
+                .iter()
+                .find_map(|item| match &item.item_type {
+                    UIItemType::TabBar(TabBarItem::Tab { .. }) => Some(item.y as f32),
+                    _ => None,
+                })
+                .unwrap_or(0.);
+            let hl = Element::new(&font, ElementContent::Text(" ".to_string()))
+                .colors(ElementColors {
+                    border: BorderColor::new(accent),
+                    bg: accent.mul_alpha(0.25).into(),
+                    text: LinearRgba::TRANSPARENT.into(),
+                })
+                .border(BoxDimension::new(Dimension::Pixels(1.)))
+                .min_width(Some(Dimension::Pixels(*width)))
+                .zindex(105);
+            self.paint_floating_element(&font, hl, *x, bar_top)?;
         }
 
         // Highlight the sidebar row being targeted

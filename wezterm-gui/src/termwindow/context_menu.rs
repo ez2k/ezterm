@@ -579,6 +579,20 @@ impl TermWindow {
                 });
             }));
         }
+        if tab_idx > 0 {
+            items.push(MenuItem::callback("Merge into left tab", move |tw| {
+                if let Some(id) = tw.tab_id_at(tab_idx) {
+                    tw.merge_tab_into(id, tab_idx - 1);
+                }
+            }));
+        }
+        if tab_idx + 1 < count {
+            items.push(MenuItem::callback("Merge into right tab", move |tw| {
+                if let Some(id) = tw.tab_id_at(tab_idx) {
+                    tw.merge_tab_into(id, tab_idx + 1);
+                }
+            }));
+        }
         if count > 1 {
             items.push(MenuItem::callback("Move tab to new window", move |tw| {
                 tw.with_tab_activated(tab_idx, |tw| tw.move_tab_to_new_window());
@@ -599,6 +613,12 @@ impl TermWindow {
             }));
         }
         items
+    }
+
+    fn tab_id_at(&self, tab_idx: usize) -> Option<mux::tab::TabId> {
+        Mux::get()
+            .get_window(self.mux_window_id)
+            .and_then(|w| w.get_tab_at_idx(tab_idx).map(|t| t.tab_id()))
     }
 
     /// Activates `tab_idx` and then runs `f`; the tab-scoped actions all

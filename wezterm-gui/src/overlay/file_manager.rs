@@ -88,6 +88,8 @@ enum FmAction {
     Refresh,
     Download,
     Upload,
+    Rename,
+    Delete,
     Quit,
 }
 
@@ -102,6 +104,8 @@ impl FmAction {
             Self::Refresh => "Refresh",
             Self::Download => "Download",
             Self::Upload => "Upload here...",
+            Self::Rename => "Rename...",
+            Self::Delete => "Delete...",
             Self::Quit => "Close file manager",
         }
     }
@@ -585,6 +589,164 @@ impl FileManager {
         self.render_status(term, text)
     }
 
+    /// Full path of the selected entry, in the backend's notation
+    fn selected_path(&self) -> Option<(FmEntry, String)> {
+        let entry = self.selected()?.clone();
+        let path = match &self.backend {
+            FileManagerBackend::Local => Path::new(&self.cwd)
+                .join(&entry.name)
+                .to_string_lossy()
+                .to_string(),
+            FileManagerBackend::Remote { .. } => remote_join(&self.cwd, &entry.name),
+        };
+        Some((entry, path))
+    }
+
+    /// Asks a yes/no question on the status line; Escape/n = no
+    fn confirm(&mut self, term: &mut TermWizTerminalRef, question: &str) -> bool {
+        let _ = self.render(term);
+        let _ = self.render_status(term, &format!("{question} [y/N]"));
+        while let Ok(Some(event)) = term.poll_input(None) {
+            match event {
+                InputEvent::Key(KeyEvent {
+                    key: KeyCode::Char('y') | KeyCode::Char('Y'),
+                    ..
+                }) => return true,
+                InputEvent::Key(KeyEvent { .. }) => return false,
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// Deletes the selected file (or empty directory) after confirmation
+    fn delete_selected(&mut self, term: &mut TermWizTerminalRef) {
+        let Some((entry, path)) = self.selected_path() else {
+            self.status = "Nothing selected".to_string();
+            return;
+        };
+        let what = if entry.is_dir { "directory" } else { "file" };
+        if !self.confirm(term, &format!("Delete {what} '{}'?", entry.name)) {
+            self.status = "Delete cancelled".to_string();
+            return;
+        }
+        let result: anyhow::Result<()> = match &self.backend {
+            FileManagerBackend::Local => {
+                if entry.is_dir {
+                    std::fs::remove_dir(&path).map_err(|e| anyhow::anyhow!("{e}"))
+                } else {
+                    std::fs::remove_file(&path).map_err(|e| anyhow::anyhow!("{e}"))
+                }
+            }
+            FileManagerBackend::Remote { sftp, .. } => {
+                let sftp = sftp.clone();
+                smol::block_on(async {
+                    if entry.is_dir {
+                        sftp.remove_dir(path.as_str()).await?;
+                    } else {
+                        sftp.remove_file(path.as_str()).await?;
+                    }
+                    anyhow::Ok(())
+                })
+            }
+        };
+        match result {
+            Ok(()) => {
+                self.status = format!("Deleted {}", entry.name);
+                if let Err(err) = self.reload() {
+                    self.status = format!("Error: {err:#}");
+                }
+            }
+            Err(err) => {
+                self.status = if entry.is_dir {
+                    format!(
+                        "Could not delete '{}' (only empty directories can be deleted): {err:#}",
+                        entry.name
+                    )
+                } else {
+                    format!("Could not delete '{}': {err:#}", entry.name)
+                };
+            }
+        }
+    }
+
+    /// Renames the selected entry within the current directory
+    fn rename_selected(&mut self, term: &mut TermWizTerminalRef) {
+        let Some((entry, src)) = self.selected_path() else {
+            self.status = "Nothing selected".to_string();
+            return;
+        };
+        let new_name = {
+            let _ = term.render(&[
+                Change::CursorPosition {
+                    x: Position::Absolute(0),
+                    y: Position::Absolute(0),
+                },
+                Change::ClearScreen(ColorAttribute::Default),
+                Change::Text(format!("Rename '{}' (Escape to cancel)\r\n", entry.name)),
+            ]);
+            let mut host = PathPromptHost {
+                history: BasicHistory::default(),
+            };
+            let mut editor = LineEditor::new(term);
+            editor.set_prompt("New name: ");
+            match editor.read_line_with_optional_initial_value(&mut host, Some(&entry.name)) {
+                Ok(Some(line)) => line.trim().to_string(),
+                _ => String::new(),
+            }
+        };
+        if new_name.is_empty() || new_name == entry.name {
+            self.status = "Rename cancelled".to_string();
+            return;
+        }
+        if new_name.contains('/') || new_name.contains('\\') {
+            self.status = "The new name must not contain path separators".to_string();
+            return;
+        }
+        let dst = match &self.backend {
+            FileManagerBackend::Local => Path::new(&self.cwd)
+                .join(&new_name)
+                .to_string_lossy()
+                .to_string(),
+            FileManagerBackend::Remote { .. } => remote_join(&self.cwd, &new_name),
+        };
+        if self.entries.iter().any(|e| e.name == new_name) {
+            self.status = format!("'{new_name}' already exists");
+            return;
+        }
+        let result: anyhow::Result<()> = match &self.backend {
+            FileManagerBackend::Local => {
+                std::fs::rename(&src, &dst).map_err(|e| anyhow::anyhow!("{e}"))
+            }
+            FileManagerBackend::Remote { sftp, .. } => {
+                let sftp = sftp.clone();
+                smol::block_on(async {
+                    sftp.rename(
+                        src.as_str(),
+                        dst.as_str(),
+                        wezterm_ssh::RenameOptions::default(),
+                    )
+                    .await?;
+                    anyhow::Ok(())
+                })
+            }
+        };
+        match result {
+            Ok(()) => {
+                self.status = format!("Renamed to {new_name}");
+                if let Err(err) = self.reload() {
+                    self.status = format!("Error: {err:#}");
+                }
+                if let Some(idx) = self.entries.iter().position(|e| e.name == new_name) {
+                    self.active_idx = idx;
+                }
+            }
+            Err(err) => {
+                self.status = format!("Could not rename '{}': {err:#}", entry.name);
+            }
+        }
+    }
+
     fn upload(&mut self, term: &mut TermWizTerminalRef) {
         let FileManagerBackend::Remote { sftp, .. } = &self.backend else {
             self.status = "Upload requires a remote (ssh domain) pane".to_string();
@@ -689,6 +851,10 @@ impl FileManager {
         if self.is_remote() {
             items.push(FmAction::Upload);
         }
+        if self.selected().is_some() {
+            items.push(FmAction::Rename);
+            items.push(FmAction::Delete);
+        }
         items.push(FmAction::Parent);
         if !self.back_stack.is_empty() {
             items.push(FmAction::Back);
@@ -733,6 +899,8 @@ impl FileManager {
             }
             FmAction::Download => self.download_selected(term),
             FmAction::Upload => self.upload(term),
+            FmAction::Rename => self.rename_selected(term),
+            FmAction::Delete => self.delete_selected(term),
             FmAction::Quit => return true,
         }
         false
@@ -848,9 +1016,9 @@ impl FileManager {
         };
 
         let help = if self.is_remote() {
-            "Enter: open  BS: up  RClick: back  m/Shift+RClick: menu  d: down  u: up  q: quit"
+            "Enter: open  BS: up  RClick: back  m: menu  d/u: down/upload  F2/Del: rename/delete  q"
         } else {
-            "Enter: open  BS: up  RClick: back  MClick: fwd  m/Shift+RClick: menu  q: quit"
+            "Enter: open  BS: up  RClick: back  MClick: fwd  m: menu  F2/Del: rename/delete  q"
         };
 
         let mut changes = vec![
@@ -926,6 +1094,18 @@ impl FileManager {
                     key: KeyCode::Escape,
                     ..
                 }) => break,
+                InputEvent::Key(KeyEvent {
+                    key: KeyCode::Function(2),
+                    ..
+                }) => {
+                    self.rename_selected(term);
+                }
+                InputEvent::Key(KeyEvent {
+                    key: KeyCode::Delete,
+                    ..
+                }) => {
+                    self.delete_selected(term);
+                }
                 InputEvent::Key(KeyEvent {
                     key: KeyCode::Char('m'),
                     modifiers: Modifiers::NONE,
