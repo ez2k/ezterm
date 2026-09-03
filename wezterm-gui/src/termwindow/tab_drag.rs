@@ -276,6 +276,69 @@ impl TermWindow {
             .map(|e| e.name.clone())
     }
 
+    /// Draws a floating label near the given pixel position (used as the
+    /// ghost while dragging tabs and panes)
+    pub fn paint_drag_ghost(&mut self, label: String, x: f32, y: f32) -> anyhow::Result<()> {
+        let font = self.fonts.title_font()?;
+        let palette = self.palette().clone();
+        let fg = palette.foreground.to_linear();
+        let accent = palette.cursor_bg.to_linear();
+        let bg = palette.background.to_linear();
+        let element = Element::new(&font, ElementContent::Text(label))
+            .colors(ElementColors {
+                border: BorderColor::new(accent),
+                bg: bg.mul_alpha(0.85).into(),
+                text: fg.into(),
+            })
+            .padding(BoxDimension {
+                left: Dimension::Cells(0.5),
+                right: Dimension::Cells(0.5),
+                top: Dimension::Cells(0.1),
+                bottom: Dimension::Cells(0.1),
+            })
+            .border(BoxDimension::new(Dimension::Pixels(1.)))
+            .zindex(110);
+        self.paint_floating_element(&font, element, x + 12., y + 12.)
+    }
+
+    /// Lays out and renders an element at an absolute pixel position
+    pub fn paint_floating_element(
+        &mut self,
+        font: &std::rc::Rc<wezterm_font::LoadedFont>,
+        element: Element,
+        x: f32,
+        y: f32,
+    ) -> anyhow::Result<()> {
+        let metrics = crate::utilsprites::RenderMetrics::with_font_metrics(&font.metrics());
+        let dims = self.dimensions;
+        let computed = self.compute_element(
+            &LayoutContext {
+                height: DimensionContext {
+                    dpi: dims.dpi as f32,
+                    pixel_max: dims.pixel_height as f32,
+                    pixel_cell: metrics.cell_size.height as f32,
+                },
+                width: DimensionContext {
+                    dpi: dims.dpi as f32,
+                    pixel_max: dims.pixel_width as f32,
+                    pixel_cell: metrics.cell_size.width as f32,
+                },
+                bounds: euclid::rect(
+                    x,
+                    y,
+                    (dims.pixel_width as f32 - x).max(1.),
+                    (dims.pixel_height as f32 - y).max(1.),
+                ),
+                metrics: &metrics,
+                gl_state: self.render_state.as_ref().unwrap(),
+                zindex: 105,
+            },
+            &element,
+        )?;
+        let gl_state = self.render_state.as_ref().unwrap();
+        self.render_element(&computed, gl_state, None)
+    }
+
     /// Draws the drag ghost and the drop indicator, if a drag is active
     pub fn paint_tab_drag(&mut self) -> anyhow::Result<()> {
         let Some(drag) = self.tab_drag.as_ref() else {
@@ -289,39 +352,15 @@ impl TermWindow {
         let target = self.tab_drop_target(&current);
 
         let font = self.fonts.title_font()?;
-        let metrics = crate::utilsprites::RenderMetrics::with_font_metrics(&font.metrics());
-        let dims = self.dimensions;
         let palette = self.palette().clone();
-        let fg = palette.foreground.to_linear();
         let accent = palette.cursor_bg.to_linear();
-        let bg = palette.background.to_linear();
 
-        let mut elements: Vec<(Element, f32, f32)> = vec![];
-
-        // The ghost follows the pointer
         let label = match &target {
             TabDropTarget::NewWindow { .. } => format!("{title}  → new window"),
             TabDropTarget::Workspace { name, .. } => format!("{title}  → {name}"),
             _ => title.clone(),
         };
-        elements.push((
-            Element::new(&font, ElementContent::Text(label))
-                .colors(ElementColors {
-                    border: BorderColor::new(accent),
-                    bg: bg.mul_alpha(0.85).into(),
-                    text: fg.into(),
-                })
-                .padding(BoxDimension {
-                    left: Dimension::Cells(0.5),
-                    right: Dimension::Cells(0.5),
-                    top: Dimension::Cells(0.1),
-                    bottom: Dimension::Cells(0.1),
-                })
-                .border(BoxDimension::new(Dimension::Pixels(1.)))
-                .zindex(110),
-            current.coords.x as f32 + 12.,
-            current.coords.y as f32 + 12.,
-        ));
+        self.paint_drag_ghost(label, current.coords.x as f32, current.coords.y as f32)?;
 
         // Insertion marker in the tab bar
         if let TabDropTarget::TabBar { x, .. } = &target {
@@ -333,71 +372,44 @@ impl TermWindow {
                     _ => None,
                 })
                 .unwrap_or(0.);
-            elements.push((
-                Element::new(&font, ElementContent::Text(" ".to_string()))
-                    .colors(ElementColors {
-                        border: BorderColor::default(),
-                        bg: accent.into(),
-                        text: LinearRgba::TRANSPARENT.into(),
-                    })
-                    .min_width(Some(Dimension::Pixels(3.)))
-                    .max_width(Some(Dimension::Pixels(3.)))
-                    .zindex(105),
-                (x - 1.5).max(0.),
-                bar_top,
-            ));
+            let marker = Element::new(&font, ElementContent::Text(" ".to_string()))
+                .colors(ElementColors {
+                    border: BorderColor::default(),
+                    bg: accent.into(),
+                    text: LinearRgba::TRANSPARENT.into(),
+                })
+                .min_width(Some(Dimension::Pixels(3.)))
+                .max_width(Some(Dimension::Pixels(3.)))
+                .zindex(105);
+            self.paint_floating_element(&font, marker, (x - 1.5).max(0.), bar_top)?;
         }
 
         // Highlight the sidebar row being targeted
         if let TabDropTarget::Workspace { row, .. } = &target {
-            let border = self.get_os_border();
-            let cell_h = self.render_metrics.cell_size.height as f32;
-            let top = self.workspace_sidebar_top() + *row as f32 * cell_h;
-            elements.push((
-                Element::new(&font, ElementContent::Text(" ".to_string()))
-                    .colors(ElementColors {
-                        border: BorderColor::new(accent),
-                        bg: accent.mul_alpha(0.25).into(),
-                        text: LinearRgba::TRANSPARENT.into(),
-                    })
-                    .border(BoxDimension::new(Dimension::Pixels(1.)))
-                    .min_width(Some(Dimension::Pixels(
-                        self.workspace_sidebar_pixel_width() as f32,
-                    )))
-                    .zindex(105),
-                border.left.get() as f32,
-                top,
-            ));
-        }
-
-        for (element, x, y) in elements {
-            let computed = self.compute_element(
-                &LayoutContext {
-                    height: DimensionContext {
-                        dpi: dims.dpi as f32,
-                        pixel_max: dims.pixel_height as f32,
-                        pixel_cell: metrics.cell_size.height as f32,
-                    },
-                    width: DimensionContext {
-                        dpi: dims.dpi as f32,
-                        pixel_max: dims.pixel_width as f32,
-                        pixel_cell: metrics.cell_size.width as f32,
-                    },
-                    bounds: euclid::rect(
-                        x,
-                        y,
-                        (dims.pixel_width as f32 - x).max(1.),
-                        (dims.pixel_height as f32 - y).max(1.),
-                    ),
-                    metrics: &metrics,
-                    gl_state: self.render_state.as_ref().unwrap(),
-                    zindex: 105,
-                },
-                &element,
-            )?;
-            let gl_state = self.render_state.as_ref().unwrap();
-            self.render_element(&computed, gl_state, None)?;
+            self.paint_sidebar_row_highlight(*row)?;
         }
         Ok(())
+    }
+
+    /// Highlights a workspace sidebar row as a drop target
+    pub fn paint_sidebar_row_highlight(&mut self, row: usize) -> anyhow::Result<()> {
+        let font = self.fonts.title_font()?;
+        let palette = self.palette().clone();
+        let accent = palette.cursor_bg.to_linear();
+        let border = self.get_os_border();
+        let cell_h = self.render_metrics.cell_size.height as f32;
+        let top = self.workspace_sidebar_top() + row as f32 * cell_h;
+        let element = Element::new(&font, ElementContent::Text(" ".to_string()))
+            .colors(ElementColors {
+                border: BorderColor::new(accent),
+                bg: accent.mul_alpha(0.25).into(),
+                text: LinearRgba::TRANSPARENT.into(),
+            })
+            .border(BoxDimension::new(Dimension::Pixels(1.)))
+            .min_width(Some(Dimension::Pixels(
+                self.workspace_sidebar_pixel_width() as f32,
+            )))
+            .zindex(105);
+        self.paint_floating_element(&font, element, border.left.get() as f32, top)
     }
 }

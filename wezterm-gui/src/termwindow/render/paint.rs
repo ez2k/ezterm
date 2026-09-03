@@ -268,6 +268,9 @@ impl crate::TermWindow {
             }
         }
 
+        self.paint_pane_drag_zone(&mut layers)
+            .context("paint_pane_drag_zone")?;
+
         if self.show_tab_bar {
             self.paint_tab_bar(&mut layers).context("paint_tab_bar")?;
         }
@@ -282,6 +285,7 @@ impl crate::TermWindow {
         drop(layers);
         self.paint_modal().context("paint_modal")?;
         self.paint_tab_drag().context("paint_tab_drag")?;
+        self.paint_pane_drag().context("paint_pane_drag")?;
 
         Ok(())
     }
