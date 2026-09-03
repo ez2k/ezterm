@@ -231,6 +231,9 @@ impl ContextMenu {
         let dimensions = term_window.dimensions;
         let win_w = dimensions.pixel_width as f32;
         let win_h = dimensions.pixel_height as f32;
+        // Size the menu to its longest label (plus row padding, border
+        // and the outer padding) rather than the remaining window width.
+        let menu_w = ((max_label as f32 + 2.) * metrics.cell_size.width as f32 + 6.).min(win_w);
 
         let layout = |term_window: &mut TermWindow, x: f32, y: f32| {
             term_window.compute_element(
@@ -245,7 +248,7 @@ impl ContextMenu {
                         pixel_max: win_w,
                         pixel_cell: metrics.cell_size.width as f32,
                     },
-                    bounds: euclid::rect(x, y, win_w - x, win_h - y),
+                    bounds: euclid::rect(x, y, menu_w, win_h - y),
                     metrics: &metrics,
                     gl_state: term_window.render_state.as_ref().unwrap(),
                     zindex: 100,
