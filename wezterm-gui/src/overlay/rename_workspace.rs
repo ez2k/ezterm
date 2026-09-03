@@ -92,3 +92,30 @@ pub fn rename_tab_prompt(
     }
     Ok(())
 }
+
+/// Prompts for the name of a new workspace and switches to it (which
+/// spawns its first window).
+pub fn new_workspace_prompt(
+    mut term: TermWizTerminal,
+    window: ::window::Window,
+) -> anyhow::Result<()> {
+    if let Some(name) = prompt_for_name(&mut term, "New workspace", "")? {
+        promise::spawn::spawn_into_main_thread(async move {
+            window.notify(crate::termwindow::TermWindowNotif::Apply(Box::new(
+                move |tw| {
+                    if let Some(pane) = tw.get_active_pane_or_overlay() {
+                        let assignment = config::keyassignment::KeyAssignment::SwitchToWorkspace {
+                            name: Some(name),
+                            spawn: None,
+                        };
+                        if let Err(err) = tw.perform_key_assignment(&pane, &assignment) {
+                            log::error!("new workspace: {err:#}");
+                        }
+                    }
+                },
+            )));
+        })
+        .detach();
+    }
+    Ok(())
+}

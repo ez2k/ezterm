@@ -80,16 +80,30 @@ impl super::TermWindow {
         let (padding_left, padding_top) = self.padding_left_top();
 
         // Clicks in the workspace sidebar are handled by the sidebar itself
-        if self.show_workspace_sidebar {
+        // (unless a context menu is open: it may overlap the sidebar and
+        // gets first pick of the event below)
+        if self.show_workspace_sidebar && !self.context_menu_is_open() {
             let sidebar_px = self.workspace_sidebar_pixel_width() as isize;
             let left = border.left.get() as isize;
             if event.coords.x >= left && event.coords.x < left + sidebar_px {
-                if let WMEK::Press(MousePress::Left) = event.kind {
-                    let y = event.coords.y.sub(self.workspace_sidebar_top() as isize);
-                    if y >= 0 {
-                        let row = y as usize / self.render_metrics.cell_size.height as usize;
+                let y = event.coords.y.sub(self.workspace_sidebar_top() as isize);
+                let row = if y >= 0 {
+                    Some(y as usize / self.render_metrics.cell_size.height as usize)
+                } else {
+                    None
+                };
+                match (&event.kind, row) {
+                    (WMEK::Press(MousePress::Left), Some(row)) => {
                         self.workspace_sidebar_click(row);
                     }
+                    (WMEK::Press(MousePress::Right), Some(row)) => {
+                        self.workspace_sidebar_context_menu(
+                            row,
+                            event.coords.x as f32,
+                            event.coords.y as f32,
+                        );
+                    }
+                    _ => {}
                 }
                 context.set_cursor(Some(CursorIcon::Default));
                 return;

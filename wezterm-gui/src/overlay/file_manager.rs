@@ -74,6 +74,74 @@ struct FileManager {
     /// a single click delivers both a press and a release event with
     /// the button set; this tracks the edge so we act only once per click
     prev_mouse_buttons: MouseButtons,
+    /// an open in-pane action menu, if any
+    menu: Option<FmMenu>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum FmAction {
+    Open,
+    View,
+    Parent,
+    Back,
+    Forward,
+    Refresh,
+    Download,
+    Upload,
+    Quit,
+}
+
+impl FmAction {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Open => "Open",
+            Self::View => "View file",
+            Self::Parent => "Go to parent",
+            Self::Back => "Back",
+            Self::Forward => "Forward",
+            Self::Refresh => "Refresh",
+            Self::Download => "Download",
+            Self::Upload => "Upload here...",
+            Self::Quit => "Close file manager",
+        }
+    }
+}
+
+/// A small popup menu drawn over the listing
+struct FmMenu {
+    items: Vec<FmAction>,
+    selected: usize,
+    /// top-left cell of the box (including its border)
+    x: usize,
+    y: usize,
+}
+
+impl FmMenu {
+    fn width(&self) -> usize {
+        self.items
+            .iter()
+            .map(|a| a.label().len())
+            .max()
+            .unwrap_or(0)
+            + 4
+    }
+
+    fn height(&self) -> usize {
+        self.items.len() + 2
+    }
+
+    /// Maps a cell position to an item index, if it is over one
+    fn hit(&self, x: usize, y: usize) -> Option<usize> {
+        if x > self.x
+            && x < self.x + self.width() - 1
+            && y > self.y
+            && y < self.y + self.height() - 1
+        {
+            Some(y - self.y - 1)
+        } else {
+            None
+        }
+    }
 }
 
 struct PathPromptHost {
@@ -212,6 +280,7 @@ impl FileManager {
             back_stack: vec![],
             fwd_stack: vec![],
             prev_mouse_buttons: MouseButtons::NONE,
+            menu: None,
         };
         fm.reload()?;
         Ok(fm)
@@ -604,6 +673,170 @@ impl FileManager {
         }
     }
 
+    /// Opens the action menu for the selected entry near cell (x, y)
+    fn open_menu(&mut self, term: &mut TermWizTerminalRef, x: usize, y: usize) {
+        let mut items = vec![];
+        match self.selected() {
+            Some(e) if e.is_dir => items.push(FmAction::Open),
+            Some(_) => {
+                items.push(FmAction::View);
+                if self.is_remote() {
+                    items.push(FmAction::Download);
+                }
+            }
+            None => {}
+        }
+        if self.is_remote() {
+            items.push(FmAction::Upload);
+        }
+        items.push(FmAction::Parent);
+        if !self.back_stack.is_empty() {
+            items.push(FmAction::Back);
+        }
+        if !self.fwd_stack.is_empty() {
+            items.push(FmAction::Forward);
+        }
+        items.push(FmAction::Refresh);
+        items.push(FmAction::Quit);
+
+        let mut menu = FmMenu {
+            items,
+            selected: 0,
+            x,
+            y,
+        };
+        // keep the box inside the pane
+        if let Ok(size) = term.get_screen_size() {
+            let w = menu.width();
+            let h = menu.height();
+            if menu.x + w > size.cols {
+                menu.x = size.cols.saturating_sub(w);
+            }
+            if menu.y + h > size.rows {
+                menu.y = size.rows.saturating_sub(h);
+            }
+        }
+        self.menu = Some(menu);
+    }
+
+    fn run_menu_action(&mut self, term: &mut TermWizTerminalRef, action: FmAction) -> bool {
+        self.status.clear();
+        match action {
+            FmAction::Open | FmAction::View => self.enter_selected(term),
+            FmAction::Parent => self.go_parent(),
+            FmAction::Back => self.go_back(),
+            FmAction::Forward => self.go_forward(),
+            FmAction::Refresh => {
+                if let Err(err) = self.reload() {
+                    self.status = format!("Error: {err:#}");
+                }
+            }
+            FmAction::Download => self.download_selected(term),
+            FmAction::Upload => self.upload(term),
+            FmAction::Quit => return true,
+        }
+        false
+    }
+
+    /// Handles input while the menu is open. Returns true if the file
+    /// manager should exit.
+    fn handle_menu_input(&mut self, term: &mut TermWizTerminalRef, event: InputEvent) -> bool {
+        let Some(menu) = self.menu.as_mut() else {
+            return false;
+        };
+        let n = menu.items.len();
+        let mut activate: Option<FmAction> = None;
+        match event {
+            InputEvent::Key(KeyEvent {
+                key: KeyCode::Escape | KeyCode::Char('q') | KeyCode::Char('m'),
+                ..
+            }) => {
+                self.menu = None;
+                return false;
+            }
+            InputEvent::Key(KeyEvent {
+                key: KeyCode::UpArrow | KeyCode::Char('k'),
+                ..
+            }) => {
+                menu.selected = (menu.selected + n - 1) % n;
+            }
+            InputEvent::Key(KeyEvent {
+                key: KeyCode::DownArrow | KeyCode::Char('j'),
+                ..
+            }) => {
+                menu.selected = (menu.selected + 1) % n;
+            }
+            InputEvent::Key(KeyEvent {
+                key: KeyCode::Enter,
+                ..
+            }) => {
+                activate = Some(menu.items[menu.selected]);
+            }
+            InputEvent::Mouse(MouseEvent {
+                x,
+                y,
+                mouse_buttons,
+                ..
+            }) => {
+                let pressed = mouse_buttons.contains(MouseButtons::LEFT)
+                    && !self.prev_mouse_buttons.contains(MouseButtons::LEFT);
+                let any_new = !mouse_buttons.is_empty() && self.prev_mouse_buttons.is_empty();
+                self.prev_mouse_buttons = mouse_buttons;
+                match menu.hit(x as usize, y as usize) {
+                    Some(idx) => {
+                        menu.selected = idx;
+                        if pressed {
+                            activate = Some(menu.items[idx]);
+                        }
+                    }
+                    None if any_new => {
+                        // click outside dismisses
+                        self.menu = None;
+                        return false;
+                    }
+                    None => {}
+                }
+            }
+            _ => {}
+        }
+        if let Some(action) = activate {
+            self.menu = None;
+            return self.run_menu_action(term, action);
+        }
+        false
+    }
+
+    fn render_menu(&self, term: &mut TermWizTerminalRef) -> termwiz::Result<()> {
+        let Some(menu) = self.menu.as_ref() else {
+            return Ok(());
+        };
+        let w = menu.width();
+        let inner = w - 2;
+        let mut changes = vec![Change::AllAttributes(CellAttributes::default())];
+        let at = |y: usize| Change::CursorPosition {
+            x: Position::Absolute(menu.x),
+            y: Position::Absolute(y),
+        };
+        changes.push(at(menu.y));
+        changes.push(Change::Text(format!("┌{}┐", "─".repeat(inner))));
+        for (idx, item) in menu.items.iter().enumerate() {
+            let label = format!(" {:<width$} ", item.label(), width = inner - 2);
+            changes.push(at(menu.y + 1 + idx));
+            changes.push(Change::Text("│".to_string()));
+            if idx == menu.selected {
+                changes.push(AttributeChange::Reverse(true).into());
+            }
+            changes.push(Change::Text(label));
+            if idx == menu.selected {
+                changes.push(AttributeChange::Reverse(false).into());
+            }
+            changes.push(Change::Text("│".to_string()));
+        }
+        changes.push(at(menu.y + menu.height() - 1));
+        changes.push(Change::Text(format!("└{}┘", "─".repeat(inner))));
+        term.render(&changes)
+    }
+
     fn render(&mut self, term: &mut TermWizTerminalRef) -> termwiz::Result<()> {
         let size = term.get_screen_size()?;
         let max_width = size.cols.saturating_sub(2);
@@ -615,9 +848,9 @@ impl FileManager {
         };
 
         let help = if self.is_remote() {
-            "click/Enter: open-view  BS: up  RClick: back  d: down  u: up  r: refresh  q: quit"
+            "Enter: open  BS: up  RClick: back  m/Shift+RClick: menu  d: down  u: up  q: quit"
         } else {
-            "click/Enter: open-view  BS: up  RClick: back  MClick: fwd  r: refresh  q: quit"
+            "Enter: open  BS: up  RClick: back  MClick: fwd  m/Shift+RClick: menu  q: quit"
         };
 
         let mut changes = vec![
@@ -670,12 +903,20 @@ impl FileManager {
             let status = self.status.clone();
             self.render_status(term, &status)?;
         }
+        self.render_menu(term)?;
         Ok(())
     }
 
     fn run_loop(&mut self, term: &mut TermWizTerminalRef) -> anyhow::Result<()> {
         self.render(term)?;
         while let Ok(Some(event)) = term.poll_input(None) {
+            if self.menu.is_some() {
+                if self.handle_menu_input(term, event) {
+                    break;
+                }
+                self.render(term)?;
+                continue;
+            }
             match event {
                 InputEvent::Key(KeyEvent {
                     key: KeyCode::Char('q'),
@@ -685,6 +926,13 @@ impl FileManager {
                     key: KeyCode::Escape,
                     ..
                 }) => break,
+                InputEvent::Key(KeyEvent {
+                    key: KeyCode::Char('m'),
+                    modifiers: Modifiers::NONE,
+                }) => {
+                    let y = HEADER_ROWS + self.active_idx.saturating_sub(self.top_row);
+                    self.open_menu(term, 2, y);
+                }
                 InputEvent::Key(KeyEvent {
                     key: KeyCode::UpArrow,
                     ..
@@ -770,7 +1018,10 @@ impl FileManager {
                     }
                 }
                 InputEvent::Mouse(MouseEvent {
-                    y, mouse_buttons, ..
+                    x,
+                    y,
+                    mouse_buttons,
+                    modifiers,
                 }) => {
                     // Both the press and the release of a click carry the
                     // button, so act only on the press edge.
@@ -796,6 +1047,17 @@ impl FileManager {
                                 }
                             }
                         }
+                    } else if right_edge && modifiers.intersects(Modifiers::SHIFT | Modifiers::CTRL)
+                    {
+                        // modified right click: action menu for the row
+                        let row = y as usize;
+                        if row >= HEADER_ROWS {
+                            let idx = self.top_row + (row - HEADER_ROWS);
+                            if idx < self.entries.len() {
+                                self.active_idx = idx;
+                            }
+                        }
+                        self.open_menu(term, x as usize, y as usize);
                     } else if right_edge {
                         // browser-style back
                         self.status.clear();

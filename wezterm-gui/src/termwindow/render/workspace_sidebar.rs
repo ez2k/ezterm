@@ -81,6 +81,136 @@ impl crate::TermWindow {
         }
     }
 
+    /// Handles a right click on the given sidebar row: shows a menu for
+    /// the workspace under the cursor, or a generic one on the header
+    /// and blank rows.
+    pub fn workspace_sidebar_context_menu(&mut self, row: usize, x: f32, y: f32) {
+        use crate::termwindow::context_menu::MenuItem;
+        let entries = self.workspace_sidebar_entries();
+        let entry = if row >= HEADER_ROWS {
+            entries.get(row - HEADER_ROWS)
+        } else {
+            None
+        };
+
+        let mut items = vec![];
+        if let Some(entry) = entry {
+            let name = entry.name.clone();
+            if !entry.is_active {
+                items.push(MenuItem::assignment(
+                    format!("Switch to '{name}'"),
+                    KeyAssignment::SwitchToWorkspace {
+                        name: Some(name.clone()),
+                        spawn: None,
+                    },
+                ));
+            }
+            items.push(MenuItem::callback("Rename workspace...", {
+                let name = name.clone();
+                move |tw| tw.workspace_sidebar_rename(name.clone())
+            }));
+            items.push(MenuItem::assignment(
+                "New window in workspace",
+                KeyAssignment::Multiple(vec![
+                    KeyAssignment::SwitchToWorkspace {
+                        name: Some(name.clone()),
+                        spawn: None,
+                    },
+                    KeyAssignment::SpawnWindow,
+                ]),
+            ));
+            items.push(MenuItem::separator());
+            items.push(MenuItem::callback("Close workspace...", {
+                let name = name.clone();
+                move |tw| tw.close_workspace_with_confirmation(name.clone())
+            }));
+            items.push(MenuItem::separator());
+        }
+        items.push(MenuItem::callback("New workspace...", |tw| {
+            tw.workspace_sidebar_new_workspace()
+        }));
+        items.push(MenuItem::assignment(
+            "Hide sidebar",
+            KeyAssignment::ShowWorkspaceSidebar,
+        ));
+        self.show_menu_at(items, x, y);
+    }
+
+    /// Prompts for the name of a new workspace and switches to it,
+    /// spawning its first window.
+    fn workspace_sidebar_new_workspace(&mut self) {
+        let mux = Mux::get();
+        let Some(tab) = mux.get_active_tab_for_window(self.mux_window_id) else {
+            return;
+        };
+        let Some(window) = self.window.clone() else {
+            return;
+        };
+        let (overlay, future) = crate::overlay::start_overlay(self, &tab, move |_tab_id, term| {
+            crate::overlay::rename_workspace::new_workspace_prompt(term, window)
+        });
+        self.assign_overlay(tab.tab_id(), overlay);
+        promise::spawn::spawn(future).detach();
+    }
+
+    /// Shows a confirmation dialog summarising what closing the workspace
+    /// would kill (windows, tabs, running programs) and closes it on
+    /// confirmation.
+    pub fn close_workspace_with_confirmation(&mut self, name: String) {
+        let mux = Mux::get();
+        let windows = mux.iter_windows_in_workspace(&name);
+        let mut tabs = 0;
+        let mut panes = 0;
+        let mut procs: Vec<String> = vec![];
+        for window_id in &windows {
+            let Some(window) = mux.get_window(*window_id) else {
+                continue;
+            };
+            for tab in window.iter_tabs() {
+                tabs += 1;
+                for pos in tab.iter_panes_ignoring_zoom() {
+                    panes += 1;
+                    if let Some(proc_name) = pos
+                        .pane
+                        .get_foreground_process_name(mux::pane::CachePolicy::AllowStale)
+                    {
+                        let base = std::path::Path::new(&proc_name)
+                            .file_name()
+                            .map(|f| f.to_string_lossy().to_string())
+                            .unwrap_or(proc_name);
+                        if !procs.contains(&base) {
+                            procs.push(base);
+                        }
+                    }
+                }
+            }
+        }
+        let is_last = mux.iter_workspaces().len() <= 1;
+        let mut message = format!(
+            "🛑 Really close workspace '{name}'?\n\n\
+             This will kill {} window(s), {tabs} tab(s) and {panes} pane(s).",
+            windows.len()
+        );
+        if !procs.is_empty() {
+            message.push_str(&format!("\nRunning: {}", procs.join(", ")));
+        }
+        if is_last {
+            message.push_str("\n\nThis is the last workspace; closing it will quit ezterm.");
+        }
+
+        let Some(tab) = mux.get_active_tab_for_window(self.mux_window_id) else {
+            return;
+        };
+        let Some(window) = self.window.clone() else {
+            return;
+        };
+        let (overlay, future) = crate::overlay::start_overlay(self, &tab, move |tab_id, term| {
+            crate::overlay::confirm_close_workspace(name, message, term, window, tab_id)
+        });
+        self.assign_overlay(tab.tab_id(), overlay);
+        promise::spawn::spawn(future).detach();
+    }
+
     /// Opens an overlay prompting for a new name for the workspace
     fn workspace_sidebar_rename(&mut self, old_name: String) {
         let mux = Mux::get();

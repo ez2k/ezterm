@@ -74,6 +74,36 @@ pub fn confirm_close_tabs(
     Ok(())
 }
 
+/// Confirms closing every window in a workspace; `message` is prepared
+/// by the caller and describes what will be killed.
+pub fn confirm_close_workspace(
+    name: String,
+    message: String,
+    mut term: TermWizTerminal,
+    window: ::window::Window,
+    tab_id: TabId,
+) -> anyhow::Result<()> {
+    if confirm::run_confirmation(&message, &mut term)? {
+        promise::spawn::spawn_into_main_thread(async move {
+            let mux = Mux::get();
+            let windows = mux.iter_windows_in_workspace(&name);
+            if mux.active_workspace() == name {
+                // Land somewhere sensible before the windows go away
+                if let Some(other) = mux.iter_workspaces().into_iter().find(|w| *w != name) {
+                    crate::frontend::front_end().switch_workspace(&other);
+                }
+            }
+            for window_id in windows {
+                mux.kill_window(window_id);
+            }
+        })
+        .detach();
+    }
+    TermWindow::schedule_cancel_overlay(window, tab_id, None);
+
+    Ok(())
+}
+
 pub fn confirm_close_window(
     mut term: TermWizTerminal,
     mux_window_id: WindowId,
