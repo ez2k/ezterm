@@ -152,6 +152,13 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: "10.12"
       BUILD_REASON: ${{ needs.meta.outputs.version == '' && 'Schedule' || ' ' }}
       TAG_NAME: ${{ needs.meta.outputs.numver }}
+      # Developer ID signing + notarization. Leave the secrets unset to get
+      # an ad-hoc signed build instead.
+      MACOS_CERT: ${{ secrets.MACOS_CERT }}
+      MACOS_CERT_PW: ${{ secrets.MACOS_CERT_PW }}
+      MACOS_TEAM_ID: ${{ secrets.MACOS_TEAM_ID }}
+      MACOS_APPLEID: ${{ secrets.MACOS_APPLEID }}
+      MACOS_APP_PW: ${{ secrets.MACOS_APP_PW }}
     steps:
       - name: "checkout repo"
         uses: actions/checkout@v5
@@ -186,7 +193,7 @@ jobs:
             cargo build --target x86_64-apple-darwin -p $pkg --release
             cargo build --target aarch64-apple-darwin -p $pkg --release
           done
-      - name: "Package (unsigned)"
+      - name: "Package (sign if secrets present)"
         shell: bash
         run: "bash ci/deploy.sh"
       - name: "Upload artifact"

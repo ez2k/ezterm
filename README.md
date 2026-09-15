@@ -106,6 +106,13 @@ end
 return config
 ```
 
+## macOS 권한 프롬프트에 대해
+
+macOS는 "전체 디스크 접근" 같은 권한을 **앱의 코드 서명 정체성**에 묶어 기억합니다. ezterm의 공개 빌드는 Apple Developer ID로 서명되어 있지 않아(ad-hoc 서명), 새 빌드를 받을 때마다 다른 앱으로 인식되어 권한을 다시 묻습니다. 정식 WezTerm과 구분되도록 번들 ID는 `com.github.ez2k.ezterm`을 씁니다.
+
+- **임시 대처**: 새 빌드를 설치한 뒤 시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근에서 기존 ezterm 항목을 지우고 다시 추가하면 그 빌드를 쓰는 동안은 프롬프트가 멈춥니다.
+- **근본 해결**: Apple 개발자 계정이 있으면 리포 Secrets에 `MACOS_CERT`(Developer ID Application .p12를 base64), `MACOS_CERT_PW`(p12 비밀번호를 base64), `MACOS_TEAM_ID`, 공증용 `MACOS_APPLEID`, `MACOS_APP_PW`(앱 암호)를 넣으세요. 이후 빌드는 자동으로 서명·공증되고 권한이 버전 간에 유지됩니다.
+
 ## 릴리즈 파이프라인
 
 `.github/workflows/release.yml` 하나가 Linux/macOS/Windows를 빌드합니다.
