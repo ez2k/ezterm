@@ -85,6 +85,14 @@ case $OSTYPE in
       security default-keychain -d user -s $def_keychain
       echo "Remove build.keychain"
       security delete-keychain build.keychain || true
+    else
+      # No Developer ID available: apply an ad-hoc signature with a stable
+      # identifier so macOS sees a validly signed bundle (fewer repeated
+      # privacy prompts within one build) instead of an unsigned one.
+      echo "Ad-hoc codesign (no MACOS_TEAM_ID)"
+      /usr/bin/codesign --force --deep --sign - \
+        --identifier com.github.ez2k.ezterm $zipdir/WezTerm.app/
+      /usr/bin/codesign --verify --deep --strict $zipdir/WezTerm.app/ || true
     fi
 
     set -x
