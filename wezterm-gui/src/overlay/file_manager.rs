@@ -95,6 +95,8 @@ enum FmAction {
     Upload,
     Rename,
     Delete,
+    /// pick a local folder with the native dialog and jump to it
+    Browse,
     Quit,
 }
 
@@ -111,6 +113,7 @@ impl FmAction {
             Self::Upload => "Upload here...",
             Self::Rename => "Rename...",
             Self::Delete => "Delete...",
+            Self::Browse => "Go to folder...",
             Self::Quit => "Close file manager",
         }
     }
@@ -540,7 +543,25 @@ impl FileManager {
         };
         let sftp = sftp.clone();
         let remote_path = remote_join(&self.cwd, &entry.name);
-        let dest = unique_local_dest(&download_dir(), &entry.name);
+        let dl_dir = download_dir();
+        let dest = {
+            let _ = self.render_status_raw(term, "Choose where to save...");
+            match native_picker::pick(&native_picker::PickRequest {
+                kind: native_picker::PickKind::SaveFile,
+                title: &format!("Download {}", entry.name),
+                start_dir: Some(&dl_dir),
+                default_name: Some(&entry.name),
+            }) {
+                Ok(Some(path)) => path,
+                Ok(None) => {
+                    self.status = "Download cancelled".to_string();
+                    return;
+                }
+                // no native dialog on this system: fall back to the
+                // downloads folder with a non-clobbering name
+                Err(_) => unique_local_dest(&dl_dir, &entry.name),
+            }
+        };
         let total = entry.size;
 
         let result = smol::block_on(async {
@@ -752,6 +773,30 @@ impl FileManager {
         }
     }
 
+    /// Local backend only: pick a folder with the native dialog and
+    /// navigate to it
+    fn browse_local_folder(&mut self, term: &mut TermWizTerminalRef) {
+        if self.is_remote() {
+            self.status = "Folder picker is only available for local panes".to_string();
+            return;
+        }
+        let _ = self.render_status_raw(term, "Choose a folder...");
+        let cwd = PathBuf::from(&self.cwd);
+        match native_picker::pick(&native_picker::PickRequest {
+            kind: native_picker::PickKind::OpenFolder,
+            title: "Go to folder",
+            start_dir: Some(&cwd),
+            default_name: None,
+        }) {
+            Ok(Some(path)) => {
+                self.status.clear();
+                self.navigate_to(path.to_string_lossy().to_string(), true);
+            }
+            Ok(None) => self.status = "Cancelled".to_string(),
+            Err(err) => self.status = format!("{err:#}"),
+        }
+    }
+
     fn upload(&mut self, term: &mut TermWizTerminalRef) {
         let FileManagerBackend::Remote { sftp, .. } = &self.backend else {
             self.status = "Upload requires a remote (ssh domain) pane".to_string();
@@ -759,25 +804,40 @@ impl FileManager {
         };
         let sftp = sftp.clone();
 
-        let local_path = {
-            let _ = term.render(&[
-                Change::CursorPosition {
-                    x: Position::Absolute(0),
-                    y: Position::Absolute(0),
-                },
-                Change::ClearScreen(ColorAttribute::Default),
-                Change::Text("Upload to the current remote directory.\r\n".to_string()),
-            ]);
-            let mut host = PathPromptHost {
-                history: BasicHistory::default(),
-            };
-            let mut editor = LineEditor::new(term);
-            editor.set_prompt("Local file path: ");
-            match editor.read_line(&mut host) {
-                Ok(Some(line)) if !line.trim().is_empty() => expand_tilde(line.trim()),
-                _ => {
-                    self.status = "Upload cancelled".to_string();
-                    return;
+        let _ = self.render_status_raw(term, "Choose a file to upload...");
+        let picked = native_picker::pick(&native_picker::PickRequest {
+            kind: native_picker::PickKind::OpenFile,
+            title: "Upload to remote directory",
+            start_dir: dirs_next::home_dir().as_deref(),
+            default_name: None,
+        });
+        let local_path = match picked {
+            Ok(Some(path)) => path,
+            Ok(None) => {
+                self.status = "Upload cancelled".to_string();
+                return;
+            }
+            Err(_) => {
+                // no native dialog available: ask for a path instead
+                let _ = term.render(&[
+                    Change::CursorPosition {
+                        x: Position::Absolute(0),
+                        y: Position::Absolute(0),
+                    },
+                    Change::ClearScreen(ColorAttribute::Default),
+                    Change::Text("Upload to the current remote directory.\r\n".to_string()),
+                ]);
+                let mut host = PathPromptHost {
+                    history: BasicHistory::default(),
+                };
+                let mut editor = LineEditor::new(term);
+                editor.set_prompt("Local file path: ");
+                match editor.read_line(&mut host) {
+                    Ok(Some(line)) if !line.trim().is_empty() => expand_tilde(line.trim()),
+                    _ => {
+                        self.status = "Upload cancelled".to_string();
+                        return;
+                    }
                 }
             }
         };
@@ -861,6 +921,9 @@ impl FileManager {
             items.push(FmAction::Delete);
         }
         items.push(FmAction::Parent);
+        if !self.is_remote() {
+            items.push(FmAction::Browse);
+        }
         if !self.back_stack.is_empty() {
             items.push(FmAction::Back);
         }
@@ -906,6 +969,7 @@ impl FileManager {
             FmAction::Upload => self.upload(term),
             FmAction::Rename => self.rename_selected(term),
             FmAction::Delete => self.delete_selected(term),
+            FmAction::Browse => self.browse_local_folder(term),
             FmAction::Quit => return true,
         }
         false
@@ -1272,6 +1336,7 @@ impl FileManager {
     }
 }
 
+use super::native_picker;
 use mux::termwiztermtab::TermWizTerminal as TermWizTerminalRef;
 
 /// A simple vi-style read-only file viewer:

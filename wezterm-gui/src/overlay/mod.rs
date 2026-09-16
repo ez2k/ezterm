@@ -12,6 +12,7 @@ pub mod copy;
 pub mod debug;
 pub mod file_manager;
 pub mod launcher;
+pub mod native_picker;
 pub mod prompt;
 pub mod quickselect;
 pub mod rename_workspace;

@@ -43,3 +43,13 @@ renames and `Delete` deletes the selected entry directly; deleting asks
 for confirmation, and only empty directories can be deleted. Navigate with the arrow keys or the
 mouse; `Escape` or a click outside dismisses it. A plain right click still
 goes back and a middle click still goes forward.
+
+## Native file dialogs
+
+Upload (`u`) opens the operating system's file picker to choose the local
+file, and download (`d`) opens a save dialog to choose where the file
+goes (defaulting to your Downloads folder). On local panes the action
+menu also offers *Go to folder...*, which opens a folder picker. macOS
+and Windows use their built-in dialogs; on Linux `zenity` or `kdialog`
+must be installed, otherwise the file manager falls back to a typed path
+prompt (upload) or the Downloads folder (download).
