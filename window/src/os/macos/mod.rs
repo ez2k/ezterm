@@ -9,6 +9,7 @@ mod app;
 pub mod bitmap;
 pub mod clipboard;
 pub mod connection;
+pub mod filedialog;
 pub mod menu;
 pub mod window;
 
@@ -17,6 +18,7 @@ mod keycodes;
 pub use self::window::*;
 pub use bitmap::*;
 pub use connection::*;
+pub use filedialog::*;
 use objc::runtime::{BOOL, NO, YES};
 
 /// Convert a rust string to a cocoa string

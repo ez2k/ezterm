@@ -50,6 +50,8 @@ Upload (`u`) opens the operating system's file picker to choose the local
 file, and download (`d`) opens a save dialog to choose where the file
 goes (defaulting to your Downloads folder). On local panes the action
 menu also offers *Go to folder...*, which opens a folder picker. macOS
-and Windows use their built-in dialogs; on Linux `zenity` or `kdialog`
-must be installed, otherwise the file manager falls back to a typed path
-prompt (upload) or the Downloads folder (download).
+On macOS the panel is the real `NSOpenPanel`/`NSSavePanel` run inside
+ezterm, so it belongs to the terminal window rather than to a helper
+process. Windows uses its built-in dialogs. On Linux `zenity` or
+`kdialog` must be installed, otherwise the file manager falls back to a
+typed path prompt (upload) or the Downloads folder (download).
