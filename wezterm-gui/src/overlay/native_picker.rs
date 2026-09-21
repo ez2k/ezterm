@@ -1,15 +1,19 @@
-//! Native file/folder pickers driven through OS-provided helpers, so the
-//! file manager (which runs off the GUI thread) can ask the user to
-//! choose a file without linking a toolkit or touching the main thread.
+//! File and folder pickers.
 //!
-//! macOS: `osascript` (`choose file` / `choose folder` / `choose file name`)
-//! Linux: `zenity`, falling back to `kdialog`
-//! Windows: PowerShell with the WinForms dialogs
+//! On macOS we run the real `NSOpenPanel`/`NSSavePanel` inside our own
+//! process (hopping to the main thread, which is where AppKit requires
+//! them to run) so that the dialog belongs to the terminal window rather
+//! than appearing as a window of a helper process.
+//!
+//! Linux has no in-process dialog without pulling in a toolkit, so we
+//! shell out to `zenity`, falling back to `kdialog`; Windows uses the
+//! WinForms dialogs via PowerShell, started without a console window.
 //!
 //! Each function returns `Ok(Some(path))` on selection, `Ok(None)` when the
 //! user cancelled, and `Err` when no picker is available (callers then
 //! fall back to a typed prompt).
 use std::path::{Path, PathBuf};
+#[cfg(not(target_os = "macos"))]
 use std::process::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +31,7 @@ pub struct PickRequest<'a> {
     pub default_name: Option<&'a str>,
 }
 
+#[cfg(not(target_os = "macos"))]
 fn output_to_path(out: std::process::Output) -> anyhow::Result<Option<PathBuf>> {
     if !out.status.success() {
         // cancel typically exits non-zero with empty stdout
@@ -42,36 +47,29 @@ fn output_to_path(out: std::process::Output) -> anyhow::Result<Option<PathBuf>> 
 
 #[cfg(target_os = "macos")]
 pub fn pick(req: &PickRequest) -> anyhow::Result<Option<PathBuf>> {
-    fn esc(s: &str) -> String {
-        s.replace('\\', "\\\\").replace('"', "\\\"")
-    }
-    let title = esc(req.title);
-    let loc = req
-        .start_dir
-        .map(|d| {
-            format!(
-                " default location (POSIX file \"{}\")",
-                esc(&d.to_string_lossy())
-            )
-        })
-        .unwrap_or_default();
-    let script = match req.kind {
-        PickKind::OpenFile => {
-            format!("POSIX path of (choose file with prompt \"{title}\"{loc})")
-        }
-        PickKind::OpenFolder => {
-            format!("POSIX path of (choose folder with prompt \"{title}\"{loc})")
-        }
-        PickKind::SaveFile => {
-            let name = req
-                .default_name
-                .map(|n| format!(" default name \"{}\"", esc(n)))
-                .unwrap_or_default();
-            format!("POSIX path of (choose file name with prompt \"{title}\"{name}{loc})")
-        }
+    use window::{FileDialogKind, FileDialogParams};
+
+    let kind = match req.kind {
+        PickKind::OpenFile => FileDialogKind::OpenFile,
+        PickKind::OpenFolder => FileDialogKind::OpenFolder,
+        PickKind::SaveFile => FileDialogKind::SaveFile,
     };
-    let out = Command::new("osascript").arg("-e").arg(script).output()?;
-    output_to_path(out)
+    let params = FileDialogParams {
+        title: req.title.to_string(),
+        start_dir: req.start_dir.map(|p| p.to_path_buf()),
+        default_name: req.default_name.map(|s| s.to_string()),
+    };
+
+    // AppKit panels must run on the main thread, but the file manager has
+    // its own thread; hand the work over and block until it answers.
+    let (tx, rx) = smol::channel::bounded(1);
+    promise::spawn::spawn_into_main_thread(async move {
+        let result = window::run_file_dialog(kind, &params);
+        let _ = tx.send(result).await;
+    })
+    .detach();
+
+    Ok(smol::block_on(rx.recv())?)
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -168,8 +166,13 @@ pub fn pick(req: &PickRequest) -> anyhow::Result<Option<PathBuf>> {
             )
         }
     };
+    // CREATE_NO_WINDOW: keep a console window from flashing up behind
+    // the dialog
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    use std::os::windows::process::CommandExt;
     let out = Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-STA", "-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()?;
     output_to_path(out)
 }
