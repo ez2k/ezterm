@@ -31,7 +31,7 @@ pub struct PickRequest<'a> {
     pub default_name: Option<&'a str>,
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn output_to_path(out: std::process::Output) -> anyhow::Result<Option<PathBuf>> {
     if !out.status.success() {
         // cancel typically exits non-zero with empty stdout
@@ -135,44 +135,76 @@ pub fn pick(req: &PickRequest) -> anyhow::Result<Option<PathBuf>> {
 
 #[cfg(windows)]
 pub fn pick(req: &PickRequest) -> anyhow::Result<Option<PathBuf>> {
+    use std::os::windows::process::CommandExt;
+
     fn esc(s: &str) -> String {
         s.replace('\'', "''")
     }
+
+    // PowerShell writes stdout using the console code page, which mangles
+    // paths containing non-ASCII characters (a Korean user folder comes
+    // back as replacement characters, and the path then doesn't exist).
+    // Have the script write UTF-8 to a temp file and read that instead.
+    let out_file = std::env::temp_dir().join(format!(
+        "ezterm-filedialog-{}-{}.txt",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let _ = std::fs::remove_file(&out_file);
+
     let title = esc(req.title);
     let dir = req
         .start_dir
         .map(|d| esc(&d.to_string_lossy()))
         .unwrap_or_default();
-    let script = match req.kind {
+    let out_path = esc(&out_file.to_string_lossy());
+
+    let dialog = match req.kind {
         PickKind::OpenFile => format!(
-            "Add-Type -AssemblyName System.Windows.Forms; \
-             $d = New-Object System.Windows.Forms.OpenFileDialog; \
+            "$d = New-Object System.Windows.Forms.OpenFileDialog; \
              $d.Title = '{title}'; $d.InitialDirectory = '{dir}'; \
-             if ($d.ShowDialog() -eq 'OK') {{ Write-Output $d.FileName }}"
+             $ok = $d.ShowDialog() -eq 'OK'; $p = $d.FileName;"
         ),
         PickKind::OpenFolder => format!(
-            "Add-Type -AssemblyName System.Windows.Forms; \
-             $d = New-Object System.Windows.Forms.FolderBrowserDialog; \
+            "$d = New-Object System.Windows.Forms.FolderBrowserDialog; \
              $d.Description = '{title}'; $d.SelectedPath = '{dir}'; \
-             if ($d.ShowDialog() -eq 'OK') {{ Write-Output $d.SelectedPath }}"
+             $ok = $d.ShowDialog() -eq 'OK'; $p = $d.SelectedPath;"
         ),
         PickKind::SaveFile => {
             let name = esc(req.default_name.unwrap_or(""));
             format!(
-                "Add-Type -AssemblyName System.Windows.Forms; \
-                 $d = New-Object System.Windows.Forms.SaveFileDialog; \
+                "$d = New-Object System.Windows.Forms.SaveFileDialog; \
                  $d.Title = '{title}'; $d.InitialDirectory = '{dir}'; $d.FileName = '{name}'; \
-                 if ($d.ShowDialog() -eq 'OK') {{ Write-Output $d.FileName }}"
+                 $ok = $d.ShowDialog() -eq 'OK'; $p = $d.FileName;"
             )
         }
     };
+    let script = format!(
+        "Add-Type -AssemblyName System.Windows.Forms; {dialog} \
+         if ($ok) {{ [IO.File]::WriteAllText('{out_path}', $p, \
+         (New-Object System.Text.UTF8Encoding($false))) }}"
+    );
+
     // CREATE_NO_WINDOW: keep a console window from flashing up behind
     // the dialog
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    use std::os::windows::process::CommandExt;
-    let out = Command::new("powershell")
+    let status = Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-STA", "-Command", &script])
         .creation_flags(CREATE_NO_WINDOW)
-        .output()?;
-    output_to_path(out)
+        .status()?;
+
+    // Cancelling leaves no file behind, which reads as "no selection"
+    let picked = std::fs::read_to_string(&out_file).ok();
+    let _ = std::fs::remove_file(&out_file);
+
+    if !status.success() {
+        return Ok(None);
+    }
+    let picked = picked
+        .map(|s| s.trim_start_matches('\u{feff}').trim().to_string())
+        .filter(|s| !s.is_empty());
+    Ok(picked.map(PathBuf::from))
 }
