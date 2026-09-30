@@ -604,7 +604,7 @@ impl FileManager {
             Err(err) => {
                 // don't leave a partial file behind
                 let _ = std::fs::remove_file(&dest);
-                self.status = format!("Download failed: {err:#}");
+                self.status = format!("Download of {remote_path} failed: {err:#}");
             }
         }
     }
@@ -895,7 +895,7 @@ impl FileManager {
                 let _ = self.reload();
             }
             Err(err) => {
-                self.status = format!("Upload failed: {err:#}");
+                self.status = format!("Upload to {remote_path} failed: {err:#}");
             }
         }
     }

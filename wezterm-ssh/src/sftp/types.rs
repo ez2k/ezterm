@@ -296,7 +296,9 @@ mod ssh2_impl {
             }
 
             match opts.write {
-                Some(WriteMode::Write) => flags |= Self::WRITE | Self::TRUNCATE,
+                // CREATE matters here: without it Sftp::create can only
+                // overwrite a file that already exists
+                Some(WriteMode::Write) => flags |= Self::WRITE | Self::TRUNCATE | Self::CREATE,
                 Some(WriteMode::Append) => flags |= Self::WRITE | Self::APPEND | Self::CREATE,
                 None => {}
             }
